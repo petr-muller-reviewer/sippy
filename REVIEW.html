@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #3409 Review: Cache Risk Analysis responses</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1f2328; line-height: 1.6; }
+  h1 { border-bottom: 1px solid #d1d9e0; padding-bottom: .5rem; }
+  h2 { margin-top: 2rem; border-bottom: 1px solid #d1d9e0; padding-bottom: .3rem; }
+  .issue { background: #fff8c5; border-left: 4px solid #d4a72c; padding: .75rem 1rem; margin: 1rem 0; border-radius: 4px; }
+  .issue h3 { margin: 0 0 .5rem 0; color: #7a4f01; }
+  .minor { background: #ddf4ff; border-left: 4px solid #54aeff; padding: .75rem 1rem; margin: 1rem 0; border-radius: 4px; }
+  .minor h3 { margin: 0 0 .5rem 0; color: #0550ae; }
+  .positive { background: #dafbe1; border-left: 4px solid #2da44e; padding: .75rem 1rem; margin: 1rem 0; border-radius: 4px; }
+  .positive h3 { margin: 0 0 .5rem 0; color: #116329; }
+  code { background: #f6f8fa; padding: .15rem .3rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  .file { color: #656d76; font-size: 0.85em; }
+  .verdict { background: #f6f8fa; border: 1px solid #d1d9e0; padding: 1rem; border-radius: 6px; margin-top: 2rem; }
+</style>
+</head>
+<body>
+
+<h1>PR #3409: Cache Risk Analysis responses</h1>
+
+<h2>Overview</h2>
+<p>Adds matview-aware Redis caching for test query results used by both Risk Analysis and the classic Sippy test API. Cache entries are invalidated when the underlying materialized view is refreshed, rather than relying solely on TTL expiration.</p>
+<p>Three-step approach:</p>
+<ol>
+  <li>Record matview refresh timestamps in Redis after each refresh completes</li>
+  <li>Store cached results wrapped with a timestamp</li>
+  <li>On cache hit, compare timestamps to decide freshness</li>
+</ol>
+<p>Also removes the dead <code>/api/canary</code> endpoint and the HTTP-level <code>CacheTime</code> on <code>/api/tests</code> (replaced by the new application-level cache).</p>
+
+<h2>Issues</h2>
+
+<div class="issue">
+  <h3>logrus.Fatalf on Redis connection refused</h3>
+  <p class="file">pkg/api/cache.go:213</p>
+<pre><code>} else if strings.Contains(err.Error(), "connection refused") {
+    logrus.WithError(err).Fatalf("redis URL specified but got connection refused; exiting due to cost issues in this configuration")
+}</code></pre>
+  <p>This kills the entire process on a transient Redis connection failure during a single cache lookup. The comment says "cost issues" but this is a very aggressive response to what could be a momentary network blip. A <code>Fatal</code> in a cache helper called from HTTP request handlers is surprising and could cause an outage from a brief Redis hiccup.</p>
+  <p>At minimum this deserves a clearer comment explaining the rationale. Better: a more targeted response (circuit breaker, or only fatal during startup probing).</p>
+</div>
+
+<div class="issue">
+  <h3>Wrong log message in BigQuery path</h3>
+  <p class="file">pkg/api/tests.go, in <code>buildTestsResultsFromBigQuery</code> (diff line 824)</p>
+<pre><code>}).Debug("buildTestsResultsFromPostgres completed")</code></pre>
+  <p>This is inside <code>buildTestsResultsFromBigQuery</code> but the log message says "Postgres". Copy-paste bug from the rename. Should say <code>"buildTestsResultsFromBigQuery completed"</code>.</p>
+</div>
+
+<div class="minor">
+  <h3>context.TODO() instead of real context</h3>
+  <p class="file">pkg/api/tests.go, in <code>buildTestsResultsFromPostgres</code> (diff line 731)</p>
+<pre><code>result, errs := GetDataFromCacheOrMatview(context.TODO(), cacheClient, ...</code></pre>
+  <p>The calling chain has a <code>context.Context</code> available (from the HTTP request in <code>PrintTestsJSONFromDB</code>, or from <code>variantsTestResultFunc</code>). Passing <code>context.TODO()</code> means cache operations won't respect request cancellation. Consider threading the context through <code>TestResultsSpec</code> or as a parameter.</p>
+</div>
+
+<h2>Observations</h2>
+
+<div class="positive">
+  <h3>Thorough test coverage</h3>
+  <p>Tests for <code>GetDataFromCacheOrMatview</code> cover: nil cache, miss, hit with/without refresh timestamp, invalidation after refresh, exact timestamp boundary, error result skipping, invalid refresh timestamp, different matviews invalidated independently, and cache duration propagation.</p>
+</div>
+
+<div class="positive">
+  <h3>Graceful degradation</h3>
+  <p>When the matview refresh timestamp is missing from Redis, cached data is used until normal TTL expiry. When <code>cacheClient</code> is nil, the code falls through to direct DB queries. Good resilience design.</p>
+</div>
+
+<div class="positive">
+  <h3>Cleanup</h3>
+  <p>Dead code removal (<code>PrintCanaryTestsFromDB</code>, <code>/api/canary</code> route) and replacing the HTTP-level <code>CacheTime</code> with proper application-level caching are welcome improvements. Confirmed no other callers exist for the removed code.</p>
+</div>
+
+<div class="verdict">
+  <h3>Verdict</h3>
+  <p>Good PR. The matview-aware invalidation is a practical approach that avoids both stale data and unnecessary cache misses. The <code>Fatalf</code> on connection refused is the main concern worth discussing before merge. The BQ log message typo and <code>context.TODO()</code> are minor fixes.</p>
+</div>
+
+</body>
+</html>
