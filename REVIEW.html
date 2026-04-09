@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #3411 Review — Comprehensive e2e testing for Component Readiness</title>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --surface: #282840;
+    --text: #cdd6f4;
+    --heading: #cba6f7;
+    --accent: #89b4fa;
+    --green: #a6e3a1;
+    --yellow: #f9e2af;
+    --red: #f38ba8;
+    --peach: #fab387;
+    --border: #45475a;
+    --code-bg: #1e1e2e;
+    --muted: #a6adc8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  h1 {
+    color: var(--heading);
+    font-size: 1.6rem;
+    margin-bottom: 0.3rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.5rem;
+  }
+  .pr-meta {
+    color: var(--accent);
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  .pr-meta a { color: var(--accent); text-decoration: none; }
+  .pr-meta a:hover { text-decoration: underline; }
+  h2 {
+    color: var(--heading);
+    font-size: 1.25rem;
+    margin-top: 1.8rem;
+    margin-bottom: 0.6rem;
+  }
+  h3 {
+    font-size: 1.05rem;
+    margin-top: 1.2rem;
+    margin-bottom: 0.4rem;
+  }
+  .priority-high h3 { color: var(--red); }
+  .priority-medium h3 { color: var(--yellow); }
+  .priority-low h3 { color: var(--green); }
+  p { margin-bottom: 0.8rem; }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.15em 0.35em;
+    font-size: 0.88em;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1rem;
+  }
+  .section.overview { border-left: 4px solid var(--accent); }
+  .section.priority-high { border-left: 4px solid var(--red); }
+  .section.priority-medium { border-left: 4px solid var(--yellow); }
+  .section.priority-low { border-left: 4px solid var(--green); }
+  .section.verdict { border-left: 4px solid var(--heading); }
+  .section.update { border-left: 4px solid var(--peach); }
+  .tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15em 0.55em;
+    border-radius: 4px;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+  }
+  .tag-high { background: var(--red); color: var(--bg); }
+  .tag-medium { background: var(--yellow); color: var(--bg); }
+  .tag-low { background: var(--green); color: var(--bg); }
+  .tag-info { background: var(--accent); color: var(--bg); }
+  .tag-update { background: var(--peach); color: var(--bg); }
+  ul { margin: 0.4rem 0 0.8rem 1.4rem; }
+  li { margin-bottom: 0.35rem; }
+  .stats {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin: 0.8rem 0;
+  }
+  .stat {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font-size: 0.85rem;
+  }
+  .stat strong { color: var(--peach); }
+  .note {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin-bottom: 0.8rem;
+  }
+  .source { color: var(--muted); font-size: 0.8rem; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6rem 0 1rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--accent); font-weight: 600; }
+  td code { border: none; padding: 0; }
+</style>
+</head>
+<body>
+
+<h1>PR #3411 — Comprehensive e2e testing for Component Readiness with abstracted data backends</h1>
+<div class="pr-meta">
+  Author: <strong>stbenjam</strong> (Stephen Benjamin) &middot;
+  Status: Open &middot; Approved + do-not-merge/hold &middot;
+  16 commits &middot; 47 files &middot;
+  <a href="https://github.com/openshift/sippy/pull/3411">View on GitHub</a>
+</div>
+
+<div class="stats">
+  <div class="stat"><strong>+4246</strong> / <strong>-1896</strong> lines</div>
+  <div class="stat"><strong>47</strong> files changed</div>
+  <div class="stat"><strong>70+</strong> new e2e tests</div>
+</div>
+
+<!-- UPDATE LOG -->
+
+<div class="section update">
+  <h2><span class="tag tag-update">Update</span> Changes since initial review (2026-04-07)</h2>
+  <p class="note">
+    5 new commits pushed after our initial review (based on <code>de9f1ec1</code>).
+    CodeRabbit ran two review rounds (14 + 12 actionable comments). CI e2e tests retriggered ~6 times, still failing.
+    PR is on <code>/hold</code>.
+  </p>
+  <table>
+    <tr><th>Commit</th><th>Description</th></tr>
+    <tr><td><code>1467315f</code></td><td>Memory fix and remove artifact</td></tr>
+    <tr><td><code>2366f730</code></td><td>Use coverage-instrumented binary for datasync e2e test</td></tr>
+    <tr><td><code>0f47bcd6</code></td><td>Add <code>TestTriageAffectsReportStatus</code> e2e test</td></tr>
+    <tr><td><code>23af8771</code></td><td>Restore GCS credentials for datasync e2e test in CI</td></tr>
+  </table>
+  <p>The new commits are mostly CI/coverage plumbing fixes and one new e2e test. No architectural changes.</p>
+</div>
+
+<!-- OVERVIEW -->
+
+<div class="section overview">
+  <h2>Overview</h2>
+  <p>
+    This PR extracts a <code>DataProvider</code> interface from the BigQuery-coupled
+    Component Readiness implementation, adds a PostgreSQL implementation, rewrites the
+    seed data command to generate deterministic synthetic data, and significantly expands
+    e2e test coverage.
+  </p>
+  <p>
+    The BigQuery provider preserves existing production behavior while the Postgres provider
+    enables local development and e2e testing without GCS/BigQuery credentials.
+  </p>
+  <h3>Architecture</h3>
+  <p>
+    The interface extraction is well-structured. <code>dataprovider.DataProvider</code> composes
+    <code>TestStatusQuerier</code>, <code>TestDetailsQuerier</code>, <code>MetadataQuerier</code>,
+    and <code>JobQuerier</code> — good separation of concerns.
+  </p>
+  <ul>
+    <li><code>bq</code> package renamed to <code>crstatus</code> — types are now backend-agnostic</li>
+    <li><code>civil.DateTime</code> &rarr; <code>time.Time</code> conversion in <code>TestJobRunRows.StartTime</code>
+        and <code>TestStatus.LastFailure</code> makes types portable across backends</li>
+    <li>Middleware pattern for release fallback, regression tracking, link injection</li>
+    <li>GORM-based PostgreSQL queries with parameterized SQL</li>
+  </ul>
+</div>
+
+<!-- HIGH PRIORITY -->
+
+<div class="section priority-high">
+  <h2><span class="tag tag-high">High</span> Priority Issues</h2>
+
+  <h3>1. <code>last_failure</code> type assertion will panic</h3>
+  <p>
+    <code>pkg/api/componentreadiness/query/querygenerators.go:783-793</code> —
+    <code>prowjob_start</code> safely handles both <code>civil.DateTime</code> and
+    <code>time.Time</code> via type switch, but <code>last_failure</code> hard-casts to
+    <code>civil.DateTime</code> only. This will panic if BigQuery returns <code>time.Time</code>.
+    Should use the same type-switch pattern.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Critical)</p>
+
+  <h3>2. <code>variantManager</code> nil panic in postgres mode</h3>
+  <p>
+    <code>cmd/sippy/serve.go:169-172</code> — <code>variantManager</code> is only initialized
+    when <code>bigQueryClient != nil</code>. The <code>/api/jobs/runs/risk_analysis</code> endpoint
+    is still reachable via <code>LocalDBCapability</code> and dereferences
+    <code>s.variantManager</code>, causing a nil pointer panic in postgres-only mode.
+    Initialize a no-op variant manager as fallback.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Critical)</p>
+
+  <h3>3. Hardcoded release metadata in Postgres provider</h3>
+  <p>
+    <code>pkg/api/componentreadiness/dataprovider/postgres/provider.go</code> — the
+    <code>releaseMetadata</code> map hardcodes GA dates and release relationships
+    (<code>4.17</code>&ndash;<code>5.0</code>). This will need manual updates each release
+    cycle and will drift. Consider deriving this from the database or configuration.
+  </p>
+
+  <h3>4. <code>QueryReleases</code> derives GA dates from current clock</h3>
+  <p>
+    <code>postgres/provider.go:184</code> — every call shifts <code>GADate</code> forward
+    because it uses the current time. This makes results non-deterministic and will
+    produce different reports depending on when they're generated.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>5. Production database safety check is fragile</h3>
+  <p>
+    <code>cmd/sippy/seed_data.go:56</code> —
+    <code>strings.Contains(f.DBFlags.DSN, "amazonaws.com")</code> is a weak guard
+    against accidentally seeding production. Only catches AWS-hosted databases.
+    Consider a more robust mechanism (e.g., an explicit <code>--i-know-what-i-am-doing</code>
+    flag, or checking for a sentinel table/row).
+  </p>
+
+  <h3>6. <code>ComponentReadinessCapability</code> is too broad</h3>
+  <p>
+    <code>pkg/sippyserver/server.go:414-416</code> — in postgres mode, this advertises
+    and enables routes like <code>/api/job/run/payload</code>,
+    <code>/api/pull_requests/test_results</code>, <code>/api/tests/v2/runs</code>, etc.,
+    but each handler immediately fails when <code>s.bigQueryClient == nil</code>.
+    Should split into separate capabilities for CR-only vs. BigQuery-dependent routes.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+</div>
+
+<!-- MEDIUM PRIORITY -->
+
+<div class="section priority-medium">
+  <h2><span class="tag tag-medium">Medium</span> Priority Issues</h2>
+
+  <h3>7. <code>successful_runs</code> overcounting in BigQuery provider</h3>
+  <p>
+    <code>bigquery/provider.go:236-250</code> — <code>total_runs</code> counts distinct
+    build IDs, but <code>successful_runs</code> uses <code>COUNTIF</code> without deduplication.
+    Pass rate can theoretically exceed 100%. Use
+    <code>COUNT(DISTINCT CASE WHEN ... THEN build_id END)</code> instead.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>8. Variant lookup failure masked as empty result</h3>
+  <p>
+    <code>postgres/provider.go:397-418</code> — <code>fetchJobVariants</code> logs DB
+    errors and returns <code>{}</code>. Callers see an empty report instead of the
+    underlying failure. Should propagate the error.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>9. Partial fallback data cached as success</h3>
+  <p>
+    <code>middleware/releasefallback/releasefallback.go:384-404</code> — if one per-release
+    goroutine fails, the error is only logged. Incomplete fallback data gets cached for
+    the full TTL. Collect goroutine errors and avoid caching partial results.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>10. Mixed release catalogs between request parsing and execution</h3>
+  <p>
+    <code>pkg/sippyserver/server.go:190</code> — release catalog helper now prefers BigQuery,
+    but <code>componentreadiness</code> may use the Postgres provider. Mixing catalogs
+    could produce inconsistent behavior.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>11. Hard-wired BigQuery provider in non-serve paths</h3>
+  <p>
+    <code>cmd/sippy/load.go:321-323</code> and <code>cmd/sippy/component_readiness.go:202-213</code>
+    hard-wire <code>bqprovider.NewBigQueryProvider</code> instead of using the configured
+    data provider. These paths won't work with postgres.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>12. <code>seed-data</code> is not idempotent</h3>
+  <p>
+    <code>cmd/sippy/seed_data.go:62</code> — the command bails if any <code>prow_jobs</code>
+    row exists. Re-running can't refresh or repair a partial dataset. Should support
+    a <code>--force</code> / <code>--refresh</code> flag or use upsert semantics.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>13. Regression-tracker failures silently ignored in seed</h3>
+  <p>
+    <code>cmd/sippy/seed_data.go:682-688</code> — <code>tracker.Errors()</code> is logged but
+    not returned. Seeding reports success even when regression tracking failed.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>14. N+1-style variant lookups in Postgres provider</h3>
+  <p>
+    <code>queryTestDetails</code> duplicates variant-fetching logic inline instead of
+    calling <code>fetchJobVariants</code>. Consider extracting the shared pattern to
+    reduce duplication and risk of divergence.
+  </p>
+
+  <h3>15. Reserved infra runs steal rows from max-sized scenarios</h3>
+  <p>
+    <code>cmd/sippy/seed_data.go:518-565</code> — the global <code>testableRuns</code>
+    value reduces every test's inserted rows by 2. When <code>counts.total == runCount</code>,
+    this steals result rows. Should compute assignment limits per-test.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>16. GCS client created unconditionally</h3>
+  <p>
+    <code>cmd/sippy/serve.go</code> — GCS client creation was moved outside the BigQuery
+    conditional. A <code>--data-provider postgres</code> user will see warnings if no
+    GCS credential file is present.
+  </p>
+
+  <h3>17. <code>noOpCache</code> error semantics</h3>
+  <p>
+    <code>noOpCache.Get</code> returns <code>fmt.Errorf("cache miss")</code> — verify
+    callers treat this as a normal cache miss without error-level logging that could
+    pollute output.
+  </p>
+
+  <h3>18. Shell script cache priming doesn't fail fast</h3>
+  <p>
+    <code>scripts/e2e.sh:105-121</code> — <code>jq</code> failure inside the
+    <code>for VIEW in $(...)</code> command substitution is not checked. Malformed
+    <code>/views</code> output silently produces no iterations instead of failing.
+    Should parse views into a checked variable first.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major, duplicate across rounds)</p>
+
+  <h3>19. Nil-check missing for <code>provider</code> in JiraAutomator</h3>
+  <p>
+    <code>pkg/componentreadiness/jiraautomator/jiraautomator.go:73-77</code> — the
+    constructor guards <code>bqClient</code> but not <code>provider</code>.
+    <code>getComponentReportForView</code> will panic on nil <code>dataProvider</code>.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Nitpick)</p>
+</div>
+
+<!-- LOW PRIORITY -->
+
+<div class="section priority-low">
+  <h2><span class="tag tag-low">Low</span> Priority / Nits</h2>
+
+  <h3>20. Error details discarded in <code>GetJobVariants</code> callers</h3>
+  <p>
+    <code>cmd/sippy/annotatejobruns.go:183-186</code> and <code>cmd/sippy/automatejira.go:173-176</code>
+    — underlying errors from <code>GetJobVariants</code> are dropped. Return
+    <code>"failed to get job variants: %v", errs</code> instead.
+  </p>
+
+  <h3>21. <code>TestKey</code> fields missing <code>bigquery:"-"</code> tags</h3>
+  <p>
+    <code>pkg/apis/api/componentreport/crstatus/types.go:56-57</code> —
+    <code>TestKey</code> and <code>TestKeyStr</code> are local bookkeeping fields,
+    not query columns. Add <code>bigquery:"-"</code> to be explicit.
+  </p>
+
+  <h3>22. Generated views file committed to the repo</h3>
+  <p>
+    <code>config/e2e-views.yaml</code> is a generated file checked into the repo. The
+    <code>seed-data</code> command overwrites it via <code>writeSyntheticViewsFile()</code>.
+    Running <code>seed-data</code> locally will dirty the working tree. Consider
+    <code>.gitignore</code>-ing it or generating to a temp path.
+  </p>
+
+  <h3>23. Leftover comment</h3>
+  <p>
+    <code>component_report_test.go:3065</code> has a comment about a moved test that
+    is no longer useful.
+  </p>
+
+  <h3>24. Non-deterministic variant ordering</h3>
+  <p>
+    <code>variantMapToArray</code> iterates a map non-deterministically — add
+    <code>sort.Strings(result)</code> for reproducible output.
+  </p>
+
+  <h3>25. Datasync e2e test missing error assertions and timeout</h3>
+  <p>
+    <code>test/e2e/datasync/datasync_test.go:23</code> — <code>sippy load</code> output
+    errors are not asserted. Should add DB error assertions and a timeout to avoid
+    flaky/hanging e2e runs.
+  </p>
+  <p class="source">Also flagged by CodeRabbit (Major)</p>
+
+  <h3>26. Coverage build overhead</h3>
+  <p>
+    Coverage infrastructure adds build time via a second binary in the Dockerfile.
+    Acceptable for CI, but worth noting.
+  </p>
+</div>
+
+<!-- TEST COVERAGE & SECURITY -->
+
+<div class="section overview">
+  <h2><span class="tag tag-info">Info</span> Test Coverage</h2>
+  <p>
+    Excellent expansion — covers all CR statuses, fallback scenarios, test details,
+    variant filtering, cross-compare, groupBy overrides. Triage tests now use real
+    seed data instead of fragile cache injection (<code>E2ECacheManipulator</code>
+    removal is a win). New <code>TestTriageAffectsReportStatus</code> e2e test added
+    in latest commits.
+  </p>
+</div>
+
+<div class="section overview">
+  <h2><span class="tag tag-info">Info</span> Security</h2>
+  <p>
+    Production database guard is a good idea but weak (see #5). No SQL injection
+    concerns — GORM parameterized queries used throughout. Coverage PVC is properly scoped.
+  </p>
+</div>
+
+<!-- VERDICT -->
+
+<div class="section verdict">
+  <h2>Verdict</h2>
+  <p>
+    Solid refactoring that properly abstracts the data layer. The interface design is
+    clean and the test coverage improvements are substantial.
+  </p>
+  <p>
+    Since initial review, CodeRabbit surfaced several additional issues worth attention:
+    the <code>last_failure</code> panic path (#1), <code>variantManager</code> nil crash
+    in postgres mode (#2), <code>successful_runs</code> overcounting (#7), and several
+    error-swallowing patterns (#8, #9, #13). The new commits are CI plumbing fixes
+    and don't change the core architecture.
+  </p>
+  <p>
+    Main blockers before merge: fix the two panic paths (#1, #2), address the overbroad
+    capability registration (#6), and decide on the release metadata strategy (#3, #4).
+    The remaining items are quality improvements that can be addressed incrementally.
+  </p>
+</div>
+
+</body>
+</html>
