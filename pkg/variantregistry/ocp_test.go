@@ -56,7 +56,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
@@ -87,7 +87,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
@@ -118,7 +118,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
@@ -149,7 +149,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
@@ -1080,7 +1080,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
@@ -1157,7 +1157,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantSecurityMode:   VariantDefaultValue,
 				VariantCGroupMode:     "v2",
 				VariantLayeredProduct: VariantNoValue,
-				VariantOS:             "rhcos9",
+				VariantOS:             "rhcos10",
 			},
 		},
 		{
@@ -1858,7 +1858,7 @@ func TestVariantSyncer(t *testing.T) {
 				VariantContainerRuntime: "crun",
 				VariantCGroupMode:       "v2",
 				VariantLayeredProduct:   VariantNoValue,
-				VariantOS:               "rhcos9",
+				VariantOS:               "rhcos10",
 			},
 		},
 		{
