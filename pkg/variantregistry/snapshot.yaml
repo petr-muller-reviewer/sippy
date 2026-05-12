@@ -1635,7 +1635,7 @@ periodic-ci-Prucek-release-master-e2e-aws-sdn-upgrade:
     Network: sdn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -8615,7 +8615,7 @@ periodic-ci-openshift-assisted-test-infra-master-e2e-metal-assisted-upgrade-agen
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -27941,7 +27941,7 @@ periodic-ci-openshift-eng-ocp-qe-perfscale-ci-main-aws-5.0-nightly-x86-loaded-up
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: perfscale
     Platform: aws
     Procedure: none
@@ -27968,7 +27968,7 @@ periodic-ci-openshift-eng-ocp-qe-perfscale-ci-main-aws-5.0-nightly-x86-loaded-up
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: perfscale
     Platform: aws
     Procedure: none
@@ -27995,7 +27995,7 @@ periodic-ci-openshift-eng-ocp-qe-perfscale-ci-main-aws-5.0-nightly-x86-loaded-up
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: perfscale
     Platform: aws
     Procedure: none
@@ -69020,7 +69020,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-e
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -69047,7 +69047,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-e
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -69074,7 +69074,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-e
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -69101,7 +69101,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-e
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -69128,7 +69128,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-e
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -69155,7 +69155,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-o
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: libvirt
     Procedure: none
@@ -69182,7 +69182,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-nightly-4.22-ocp-o
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: libvirt
     Procedure: none
@@ -69209,7 +69209,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -69236,7 +69236,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -69263,7 +69263,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -69290,7 +69290,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -69317,7 +69317,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -69344,7 +69344,7 @@ periodic-ci-openshift-multiarch-main-nightly-5.0-upgrade-from-stable-4.22-ocp-e2
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -70238,7 +70238,7 @@ periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-classic-staging-ocm-fvt-
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: service-delivery
     Platform: rosa
     Procedure: none
@@ -70318,7 +70318,7 @@ periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-classic-staging-ocm-fvt-
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: service-delivery
     Platform: rosa
     Procedure: none
@@ -70478,7 +70478,7 @@ periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-hcp-staging-ocm-fvt-peri
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: service-delivery
     Platform: rosa
     Procedure: none
@@ -70518,7 +70518,7 @@ periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-hcp-staging-ocm-fvt-peri
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: service-delivery
     Platform: rosa
     Procedure: none
@@ -247376,7 +247376,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-aws-ovn-u
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -247403,7 +247403,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-aws-ovn-u
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -247430,7 +247430,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-aws-runc-
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -247457,7 +247457,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-azure-ovn
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -247484,7 +247484,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-azure-run
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -247511,7 +247511,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-gcp-ovn-r
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -247538,7 +247538,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-gcp-ovn-u
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -247565,7 +247565,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-gcp-runc-
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -247592,7 +247592,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-metal-ovn
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -247619,7 +247619,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-vsphere-o
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: vsphere
     Procedure: none
@@ -247646,7 +247646,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-vsphere-o
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: vsphere
     Procedure: none
@@ -247673,7 +247673,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-e2e-vsphere-r
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: vsphere
     Procedure: none
@@ -247700,7 +247700,7 @@ periodic-ci-openshift-release-main-ci-5.0-upgrade-from-stable-4.22-from-stable-4
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -248558,7 +248558,7 @@ periodic-ci-openshift-release-main-dev-preview-4-e2e-aws-ovn-upgrade:
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -248578,7 +248578,7 @@ periodic-ci-openshift-release-main-dev-preview-5-e2e-aws-ovn-upgrade:
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -308812,7 +308812,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.21-e2e-aws-
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -308839,7 +308839,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-aws-
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -308866,7 +308866,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-aws-
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: network-flow-matrix
@@ -308893,7 +308893,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -308920,7 +308920,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: network-flow-matrix
@@ -308947,7 +308947,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -308974,7 +308974,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv6
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -309001,7 +309001,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -309028,7 +309028,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -309055,7 +309055,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -309082,7 +309082,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-meta
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: metal
     Procedure: none
@@ -309109,7 +309109,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-vsph
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: vsphere
     Procedure: none
@@ -309136,7 +309136,7 @@ periodic-ci-openshift-release-main-nightly-5.0-upgrade-from-stable-4.22-e2e-vsph
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: vsphere
     Procedure: none
@@ -311926,7 +311926,7 @@ periodic-ci-openshift-release-main-okd-scos-5.0-upgrade-from-okd-scos-4.22-e2e-a
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -311969,7 +311969,7 @@ periodic-ci-openshift-release-main-stable-4.y-e2e-aws-ovn-upgrade:
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
@@ -311989,7 +311989,7 @@ periodic-ci-openshift-release-main-stable-4.y-e2e-azure-ovn-upgrade:
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: azure
     Procedure: none
@@ -312008,7 +312008,7 @@ periodic-ci-openshift-release-main-stable-4.y-e2e-gcp-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: gcp
     Procedure: none
@@ -334208,7 +334208,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-cso-quay-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334226,7 +334226,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-qbo-quay-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334244,7 +334244,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay313-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334262,7 +334262,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay314-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334280,7 +334280,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay315-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334298,7 +334298,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay316-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334316,7 +334316,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay317-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -334334,7 +334334,7 @@ periodic-ci-quay-quay-tests-master-quay-upgrade-quay318-ocp421-upgrade:
     LayeredProduct: none
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Procedure: none
     Scheduler: default
@@ -343089,7 +343089,7 @@ periodic-ci-shiftstack-ci-release-5.0-upgrade-from-stable-4.22-e2e-openstack-ovn
     Network: ovn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: openstack
     Procedure: none
@@ -343304,7 +343304,7 @@ periodic-ci-smg247-release-master-e2e-aws-sdn-upgrade:
     Network: sdn
     NetworkAccess: default
     NetworkStack: ipv4
-    OS: rhcos10
+    OS: rhcos9
     Owner: eng
     Platform: aws
     Procedure: none
