@@ -479,7 +479,7 @@ component_readiness:
   metrics:
     enabled: false
   regression_tracking:
-    enabled: false
+    enabled: true
 - name: 5.0-ha-vs-single
   base_release:
     release: "5.0"
