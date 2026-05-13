@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3528</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 52em;
+    margin: 2em auto;
+    padding: 0 1.5em;
+    background: #fafafa;
+  }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #0969da; padding-bottom: 0.3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; color: #24292f; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; }
+  code { background: #eef0f3; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em; overflow-x: auto; }
+  .meta { background: #fff; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5em; }
+  .meta td { padding: 0.15em 0.8em 0.15em 0; vertical-align: top; }
+  .meta td:first-child { font-weight: 600; white-space: nowrap; }
+  .verdict { padding: 0.8em 1em; border-radius: 6px; margin-bottom: 1.5em; }
+  .verdict.approve { background: #dafbe1; border-left: 4px solid #1a7f37; }
+  .verdict.request-changes { background: #ffebe9; border-left: 4px solid #cf222e; }
+  .severity { display: inline-block; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4em; }
+  .severity.blocking { background: #ffebe9; color: #cf222e; }
+  .severity.should-fix { background: #fff8c5; color: #7d6608; }
+  .severity.nit { background: #eef0f3; color: #57606a; }
+  .severity.question { background: #ddf4ff; color: #0550ae; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: 0.3em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3528</h1>
+
+<div class="meta">
+<table>
+  <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3528">openshift/sippy#3528</a></td></tr>
+  <tr><td>Title</td><td>ROSAENG-1083: remove unrelated jobs from 4.22 section</td></tr>
+  <tr><td>Head SHA</td><td><code>05ace06cf612a72a9b7c289c28d76fae04820e91</code></td></tr>
+  <tr><td>Base</td><td><code>main</code></td></tr>
+  <tr><td>Reviewed</td><td>2026-05-13T22:14:22+02:00</td></tr>
+</table>
+</div>
+
+<div class="verdict approve">
+  <strong>Verdict: Approve</strong>
+  <p>Straightforward config cleanup. All removed ROSA e2e jobs are already covered by the <code>rosa-stage</code> section's regexp. No CI visibility is lost. No code changes involved.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Removes 31 explicit ROSA e2e job entries from the <code>"4.22"</code> release section in <code>config/openshift.yaml</code>.</li>
+  <li>These jobs (OCM FVT staging tests, ROSA Classic/HCP staging tests, ROSA nightly e2e tests, daily status) are ROSA-specific and don't belong under the OCP 4.22 release tracking.</li>
+  <li>The <code>rosa-stage</code> section already captures all of them via the regexp <code>^periodic-ci-openshift-online-rosa-e2e-main-.*</code>.</li>
+  <li>Some removed nightly jobs covered versions other than 4.22 (4.19, 4.20, 4.21, 5.0), confirming they were misplaced.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<p>No blocking issues, no should-fix items, no nits.</p>
+
+<h3><span class="severity question">question</span> Were these jobs ever intentionally in 4.22?</h3>
+<p><code>config/openshift.yaml:12583-12614</code> (pre-patch line numbers)</p>
+<p>The removed nightly jobs span versions 4.19 through 5.0, not just 4.22. Were these added intentionally at some point (e.g. to get ROSA visibility within 4.22 dashboards) or was it always a mistake? This only matters for historical understanding.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>All 31 removed jobs match the <code>rosa-stage</code> regexp <code>^periodic-ci-openshift-online-rosa-e2e-main-.*</code> (line 17163), so none lose tracking.</li>
+  <li>The <code>rosa-stage</code> section (lines 17159-17165) has no version-specific filter that would exclude any of these jobs.</li>
+  <li>No other sections in the config reference these exact job names (no orphaned cross-references).</li>
+  <li>The three job categories (OCM FVT staging, ROSA nightly, daily status) are all ROSA-specific, not OCP 4.22 release tests.</li>
+  <li>Surrounding jobs in the 4.22 section (OLS load generator, openshift-tests-private) are unaffected by the removal.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Were these jobs producing any 4.22-specific dashboard widgets that will now disappear from the 4.22 view? If so, is that the desired outcome?</li>
+</ul>
+
+</body>
+</html>
