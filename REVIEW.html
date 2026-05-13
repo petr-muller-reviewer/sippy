@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3518</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 900px; margin: 2em auto; padding: 0 1em; color: #24292f; background: #fff; }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #d0d7de; padding-bottom: 0.3em; }
+  h2 { font-size: 1.2em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.3em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  .header-block { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5em; }
+  .header-block p { margin: 0.2em 0; }
+  .verdict { padding: 0.8em 1em; border-radius: 6px; margin-bottom: 1.5em; }
+  .verdict-discuss { background: #fff8c5; border: 1px solid #d4a72c; }
+  .severity { display: inline-block; font-size: 0.75em; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; text-transform: uppercase; margin-right: 0.5em; vertical-align: middle; }
+  .sev-blocking { background: #ffebe9; color: #82071e; }
+  .sev-should-fix { background: #fff8c5; color: #6a4a00; }
+  .sev-nit { background: #ddf4ff; color: #0550ae; }
+  .sev-question { background: #f6f8fa; color: #57606a; border: 1px solid #d0d7de; }
+  .finding { margin-bottom: 1.5em; padding-left: 0.5em; border-left: 3px solid #d0d7de; }
+  .finding-shouldfix { border-left-color: #d4a72c; }
+  .finding-nit { border-left-color: #54aeff; }
+  .finding-question { border-left-color: #8b949e; }
+  ul { padding-left: 1.5em; }
+  li { margin-bottom: 0.3em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .del { background: #ffebe9; color: #82071e; }
+  .add { background: #dafbe1; color: #116329; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3518</h1>
+
+<div class="header-block">
+  <p><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3518">openshift/sippy#3518</a></p>
+  <p><strong>Title:</strong> TRT-1989: schema migration for non gorm based tables</p>
+  <p><strong>Head SHA:</strong> <code>af8b425f6fff20781b22a54753206e1f4d7ccaa8</code></p>
+  <p><strong>Base:</strong> main</p>
+  <p><strong>Reviewed:</strong> 2026-05-13T22:20:44Z</p>
+  <p><strong>Author:</strong> neisw (Forrest Babcock)</p>
+</div>
+
+<div class="verdict verdict-discuss">
+  <strong>Verdict: Needs discussion</strong>
+  <p>The core migration infrastructure (the <code>pkg/db/migrate</code> package, SQL migrations, CLI commands, and e2e tests) is well-designed and sound. However, the PR bundles several unrelated changes (MCP server rewrite, frontend symptom removal, variant registry tier changes, lint script changes) that make independent review difficult and increase merge risk. I'd like to discuss splitting those out, and there are a few specific issues worth addressing before merge.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces <code>golang-migrate/migrate</code> to manage tables GORM can't handle (partitioned tables), replacing the old <code>syncPartitionedTables</code> imperative approach with versioned, embedded SQL migrations.</li>
+  <li>Adds baseline detection: on existing databases that predate golang-migrate, stamps the migration version without re-running DDL.</li>
+  <li>Adds CLI subcommands (<code>migrate version</code>, <code>migrate force</code>, <code>migrate down</code>) for operational control.</li>
+  <li>Includes e2e migration tests verifying up/down/force/version lifecycle and that the shared GORM connection survives migration operations.</li>
+  <li>Bundles: MCP server rewrite (async&rarr;sync, removed tools), frontend symptom aggregation removal, variant registry tier promotions, lint script changes, test URL updates.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-should-fix">should fix</span> Two migrate instances created in baseline path</h3>
+<div class="finding finding-shouldfix">
+  <p><code>pkg/db/migrate/migrate.go:101-118</code></p>
+  <p>When baseline stamping is needed, two separate <code>migrate.Migrate</code> instances are created &mdash; one for the <code>Force()</code> call and another for the subsequent <code>Up()</code>. Each opens its own postgres driver instance. A single instance with <code>Force()</code> then <code>Up()</code> would avoid the redundant allocation.</p>
+<pre>
+m, cleanup, err := newMigrate(gormDB)
+...
+if err := m.Force(baselineVersion); err != nil {
+...
+<span class="add">// second instance created here:</span>
+m, cleanup, err := newMigrate(gormDB)
+...
+if err := m.Up(); err != nil &amp;&amp; err != migrate.ErrNoChange {
+</pre>
+</div>
+
+<h3><span class="severity sev-should-fix">should fix</span> Redis DB isolation removed in e2e</h3>
+<div class="finding finding-shouldfix">
+  <p><code>scripts/e2e.sh:73</code></p>
+  <p>Previously e2e used <code>redis://sippy-redis:6379/1</code> (logical DB 1) to isolate from dev's DB 0. Now it uses the default DB 0 with no isolation. If a dev <code>sippy serve</code> and e2e run concurrently, they share the Redis keyspace, risking flaky tests. The explanatory comment was also removed.</p>
+<pre>
+<span class="del">-    export REDIS_URL="${SIPPY_E2E_REDIS_URL:-redis://sippy-redis:6379/1}"</span>
+<span class="add">+    export REDIS_URL="${REDIS_URL:-redis://sippy-redis:6379}"</span>
+</pre>
+</div>
+
+<h3><span class="severity sev-should-fix">should fix</span> MCP silently ignores missing BigQuery creds for bigquery provider</h3>
+<div class="finding finding-shouldfix">
+  <p><code>mcp/server.py:343-345</code></p>
+  <p>Previously, calling <code>sippy_serve</code> with <code>data_provider=bigquery</code> without credentials returned a clear early error. Now the error is discarded (<code>creds_path, _ = ...</code>), the server starts without credentials, and crashes later with an opaque error.</p>
+<pre>
+<span class="del">-    creds_path, creds_err = _resolve_bigquery_creds(bigquery_credentials_file)</span>
+<span class="add">+    creds_path, _ = _resolve_bigquery_creds(bigquery_credentials_file)</span>
+     if creds_path:
+         args.extend(["--google-service-account-credential-file", str(creds_path)])
+<span class="del">-    elif data_provider == "bigquery":</span>
+<span class="del">-        return f"BigQuery credentials required for data_provider=bigquery: {creds_err}"</span>
+</pre>
+</div>
+
+<h3><span class="severity sev-nit">nit</span> <code>errors.Is</code> vs <code>==</code> for sentinel errors</h3>
+<div class="finding finding-nit">
+  <p><code>cmd/sippy/migrate.go:48</code> and <code>pkg/db/migrate/migrate.go:118,123,157,179,184</code></p>
+  <p>Multiple places use <code>==</code>/<code>!=</code> to compare against <code>gomigrate.ErrNilVersion</code> and <code>migrate.ErrNoChange</code>. While <code>golang-migrate</code> currently returns bare sentinels, <code>errors.Is</code> is idiomatic Go and future-proof against wrapping.</p>
+<pre>
+<span class="del">if err == gomigrate.ErrNilVersion {</span>
+<span class="add">if errors.Is(err, gomigrate.ErrNilVersion) {</span>
+</pre>
+</div>
+
+<h3><span class="severity sev-question">question</span> Lint script behavior change for local developers</h3>
+<div class="finding finding-question">
+  <p><code>hack/go-lint.sh:6-9</code></p>
+  <p>Old script ran golangci-lint directly if the binary was found (<code>command -v</code>). New script only runs directly when <code>CI=true</code>, otherwise always requires a container (podman/docker). Developers with golangci-lint installed locally will now be forced through the container path. Is this intentional?</p>
+<pre>
+<span class="del">-if command -v golangci-lint &amp;>/dev/null; then</span>
+<span class="add">+if [ "$CI" = "true" ];</span>
+<span class="add">+then</span>
+</pre>
+</div>
+
+<h3><span class="severity sev-question">question</span> Scope of the PR</h3>
+<div class="finding finding-question">
+  <p>(whole PR)</p>
+  <p>The PR bundles migration infrastructure with: MCP server rewrite (async&rarr;sync, removed <code>restore_prodlike_db</code>/<code>run_e2e</code> tools, removed <code>python-dotenv</code>), frontend symptom aggregation removal from <code>TestDetailsReport.js</code>, variant registry tier promotions (vsphere hybrid-env &rarr; standard), lint script changes, e2e test URL updates. These are independent concerns that would be easier to review and safer to merge separately.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Migration SQL is idempotent (<code>CREATE TABLE IF NOT EXISTS</code>, <code>CREATE INDEX IF NOT EXISTS</code>) &mdash; correct for baseline case.</li>
+  <li>Baseline detection logic: checks <code>schema_migrations</code> absence + <code>test_analysis_by_job_by_dates</code> presence before stamping &mdash; sound approach.</li>
+  <li>Connection preservation: cleanup function only closes <code>iofs</code> source, not the underlying <code>*sql.DB</code> &mdash; correct.</li>
+  <li>E2e migration tests use isolated tracking table (<code>e2e_schema_migrations</code>) &mdash; no interference with production migrations.</li>
+  <li><code>down</code> migration drops entire partitioned table including partitions &mdash; expected, consistent with <code>up</code>.</li>
+  <li>Embedded SQL via <code>//go:embed *.sql</code> in <code>migrations.go</code> &mdash; standard pattern.</li>
+  <li>CLI subcommands (<code>version</code>, <code>force</code>, <code>down</code>) wire flags correctly via <code>f.BindFlags</code>.</li>
+  <li><code>go 1.25</code> &rarr; <code>go 1.25.0</code> &mdash; no functional change.</li>
+  <li>Vendor diff is solely from the <code>golang-migrate</code> dependency and its transitive deps.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is there a reason the baseline stamping and the subsequent <code>Up()</code> use two separate <code>migrate.Migrate</code> instances instead of reusing one?</li>
+  <li>Was the Redis DB isolation removal in e2e intentional? What prevents keyspace collisions with concurrent dev servers?</li>
+  <li>Should the MCP <code>sippy_serve</code> tool still validate BigQuery credentials when <code>data_provider=bigquery</code> is explicitly requested?</li>
+  <li>Are the bundled changes (MCP rewrite, frontend, variant registry) intended for this PR, or could they be split out?</li>
+</ul>
+
+</body>
+</html>
