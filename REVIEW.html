@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: PR #3527</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+  }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; margin-bottom: 0.3rem; }
+  a { color: #0969da; }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85em;
+    background: #f6f8fa;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.82em;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    line-height: 1.5;
+  }
+  .verdict { background: #fff8c5; border-left: 4px solid #d4a72c; padding: 0.6rem 1rem; margin: 1rem 0; }
+  .finding { margin-bottom: 1.5rem; }
+  .finding-loc { display: inline-block; background: #ddf4ff; border: 1px solid #54aeff; border-radius: 4px; padding: 0.1em 0.5em; font-family: monospace; font-size: 0.85em; margin: 0.3rem 0; }
+  .severity-blocking { color: #cf222e; font-weight: 600; }
+  .severity-should-fix { color: #bf8700; font-weight: 600; }
+  .severity-nit { color: #57606a; font-weight: 600; }
+  .severity-question { color: #0969da; font-weight: 600; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.3rem; }
+  .checklist li { color: #57606a; }
+</style>
+</head>
+<body>
+
+<h1>PR #3527: Add the symptoms overview to test details report</h1>
+<p>
+  Branch: <code>test-details-symptoms</code> &rarr; <code>main</code><br>
+  Author: dgoodwin<br>
+  <a href="https://github.com/openshift/sippy/pull/3527">github.com/openshift/sippy/pull/3527</a>
+</p>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Needs discussion</strong> &mdash; one real bug (missing HTTP status check on the symptoms fetch), one defensive gap worth raising. The rest is solid reuse of an existing component.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Reuses the <code>TriageSymptoms</code> component (previously triage-page only) on the test details report page.</li>
+  <li>Adds a <code>useEffect</code> in <code>TestDetailsReport</code> that counts symptom occurrences across sample job runs from <code>data.analyses[0].job_stats</code>, fetches symptom metadata from <code>/api/jobs/symptoms</code>, computes prevalence percentages, and passes the result to <code>TriageSymptoms</code>.</li>
+  <li>Makes the "Regressions" column in <code>TriageSymptoms</code> conditional: shown on the triage page (where <code>regression_count</code> exists), hidden on the test details page (where it doesn't).</li>
+  <li>Adapts tooltip text and filter button visibility based on which context the component is rendered in.</li>
+  <li>Makes <code>setSymptomFilter</code> prop optional (was <code>.isRequired</code>) since the test details usage doesn't need filtering.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity-should-fix">Should fix</span> &mdash; No HTTP status check on symptoms fetch</h3>
+<div class="finding">
+  <span class="finding-loc"><a href="https://github.com/openshift/sippy/blob/d206e81493c44dec4168cd4c9f42d40a2da3dd06/sippy-ng/src/component_readiness/TestDetailsReport.js#L237-L239">TestDetailsReport.js:237-239</a></span>
+<pre><span style="color:#6e7781">fetch(process.env.REACT_APP_API_URL + '/api/jobs/symptoms', {</span>
+<span style="color:#6e7781">  signal: controller.signal,</span>
+<span style="color:#6e7781">})</span>
+<span style="color:#cf222e">  .then((r) => r.json())</span></pre>
+  <p>
+    The response is unconditionally parsed as JSON without checking <code>r.ok</code> or the status code. If the API returns a 500 or 404, <code>r.json()</code> will either throw on a non-JSON body or silently parse an error payload, producing a bogus <code>lookup</code> table where no symptom IDs match. The result: symptoms display with raw IDs instead of summaries, with no error indication to the user.
+  </p>
+  <p>
+    Compare with the existing fetch pattern in the same file (lines 168-178) which explicitly checks <code>data.code</code>. At minimum, a <code>if (!r.ok) throw new Error(...)</code> guard would be consistent.
+  </p>
+</div>
+
+<h3><span class="severity-nit">Nit</span> &mdash; <code>setSymptomFilter</code> callable when undefined</h3>
+<div class="finding">
+  <span class="finding-loc"><a href="https://github.com/openshift/sippy/blob/d206e81493c44dec4168cd4c9f42d40a2da3dd06/sippy-ng/src/component_readiness/TriageSymptoms.js#L108-L113">TriageSymptoms.js:108-113</a></span>
+<pre><span style="color:#6e7781">onClick={() =></span>
+<span style="color:#6e7781">  setSymptomFilter(</span>
+<span style="color:#6e7781">    symptomFilter === ss.symptom.id</span>
+<span style="color:#6e7781">      ? null</span>
+<span style="color:#6e7781">      : ss.symptom.id</span>
+<span style="color:#6e7781">  )</span>
+<span style="color:#6e7781">}</span></pre>
+  <p>
+    <code>setSymptomFilter</code> was changed from <code>PropTypes.func.isRequired</code> to <code>PropTypes.func</code>, but the click handler on the filter <code>IconButton</code> calls it without a guard. Currently safe because the button only renders when <code>showRegressions</code> is true (meaning regression data is present, meaning the triage page caller is in play, meaning the prop is always provided). But if someone later passes <code>symptomSummaries</code> with <code>regression_count</code> set without also providing <code>setSymptomFilter</code>, the click handler throws. Low risk, but worth a <code>setSymptomFilter?.()</code> or documenting the invariant.
+  </p>
+</div>
+
+<h3><span class="severity-question">Question</span> &mdash; <code>useEffect</code> dependency on <code>[data]</code> object reference</h3>
+<div class="finding">
+  <span class="finding-loc"><a href="https://github.com/openshift/sippy/blob/d206e81493c44dec4168cd4c9f42d40a2da3dd06/sippy-ng/src/component_readiness/TestDetailsReport.js#L214-L260">TestDetailsReport.js:214-260</a></span>
+  <p>
+    The symptom-counting effect depends on <code>[data]</code>. Since <code>data</code> is always a fresh object from <code>setData(json)</code>, this works today: it re-runs once per data fetch. But the dependency is on object identity, not content. I'm not sure whether this was an intentional "re-run whenever data changes" choice or just the simplest thing. Worth confirming the author considered this &mdash; it's not a bug now, but it's the kind of thing that breaks quietly if someone adds a <code>setData({...data, field: x})</code> call later.
+  </p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checklist">
+  <li><code>AbortController</code> cleanup in the new <code>useEffect</code> &mdash; correctly returns <code>() => controller.abort()</code>, and the catch handler properly ignores <code>AbortError</code>.</li>
+  <li>Early return when <code>data.analyses</code> or <code>job_stats</code> is missing &mdash; correctly clears <code>symptomSummaries</code> to <code>[]</code>.</li>
+  <li><code>showRegressions</code> heuristic &mdash; checking <code>symptomSummaries[0].regression_count !== undefined</code> is a reasonable duck-type to distinguish triage vs. test-details context. Consistent across the header and body rows.</li>
+  <li>Existing <code>Triage.js</code> call site still passes all three props (<code>symptomSummaries</code>, <code>symptomFilter</code>, <code>setSymptomFilter</code>) &mdash; no regression there.</li>
+  <li>The <code>total = totalRuns || 1</code> guard prevents division by zero.</li>
+  <li>Symptom ID used as fallback summary (<code>lookup[id] || id</code>) &mdash; acceptable degradation if the metadata fetch returns something unexpected.</li>
+  <li>Sort order (descending by <code>job_run_count</code>) makes sense for the UI.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The <code>/api/jobs/symptoms</code> fetch doesn't check <code>r.ok</code> before calling <code>r.json()</code>. Was this intentional, or should we add a status check consistent with the test details fetch above it?</li>
+  <li>Should <code>setSymptomFilter</code> use optional chaining (<code>setSymptomFilter?.()</code>) now that it's no longer required, or is the invariant "if <code>regression_count</code> is present, <code>setSymptomFilter</code> must be provided" intentional and worth documenting?</li>
+</ul>
+
+</body>
+</html>
