@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #3498 Review: TRT-2647 — rhcos10 default for 5.0</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .pr-meta {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+  .pr-meta span { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .label {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid;
+  }
+  .label-hold { color: var(--red); border-color: var(--red); }
+  .label-approved { color: var(--green); border-color: var(--green); }
+  .label-review { color: var(--cyan); border-color: var(--cyan); }
+
+  h2 {
+    font-size: 1.2rem;
+    margin: 2rem 0 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  h3 {
+    font-size: 1rem;
+    margin: 1.25rem 0 0.5rem;
+    color: var(--purple);
+  }
+
+  .file-list {
+    list-style: none;
+    margin: 0.5rem 0;
+  }
+  .file-list li {
+    padding: 0.4rem 0.75rem;
+    border-left: 3px solid var(--border);
+    margin-bottom: 0.25rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+    background: var(--surface);
+    border-radius: 0 4px 4px 0;
+  }
+  .file-list .lines {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-left: 0.5rem;
+  }
+  .file-list .added { color: var(--green); }
+  .file-list .removed { color: var(--red); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+  }
+  .card-title {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .severity {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+  }
+  .sev-question { background: #d2992233; color: var(--yellow); }
+  .sev-info { background: #58a6ff22; color: var(--accent); }
+  .sev-suggestion { background: #bc8cff22; color: var(--purple); }
+  .sev-ok { background: #3fb95022; color: var(--green); }
+
+  .card p, .card ul { color: var(--text-muted); font-size: 0.9rem; }
+  .card ul { padding-left: 1.25rem; margin-top: 0.3rem; }
+  .card li { margin-bottom: 0.2rem; }
+
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    background: #ffffff10;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    margin: 0.5rem 0;
+    line-height: 1.5;
+  }
+  pre .add { color: var(--green); }
+  pre .del { color: var(--red); }
+  pre .ctx { color: var(--text-muted); }
+
+  .verdict-box {
+    border: 2px solid var(--green);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 2rem;
+    background: #3fb95008;
+  }
+  .verdict-box h2 { border: none; margin-top: 0; color: var(--green); }
+
+  .comment-ref {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
+
+  .checklist { list-style: none; margin: 0.5rem 0; }
+  .checklist li {
+    padding: 0.3rem 0;
+    font-size: 0.9rem;
+  }
+  .checklist li::before {
+    content: '';
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .diff-section { margin: 1rem 0; }
+  .diff-header {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #3498 &mdash; TRT-2647: rhcos10 default for 5.0</h1>
+<div class="pr-meta">
+  <span>Author: <strong>neisw</strong> (Forrest Babcock)</span>
+  <span>Assignee: <strong>petr-muller</strong></span>
+  <span>+1818 / &minus;1900</span>
+  <span><span class="label label-approved">approved</span></span>
+  <span><span class="label label-hold">do-not-merge/hold</span></span>
+  <span><span class="label label-review">ready-for-human-review</span></span>
+</div>
+
+<h2>Files Changed</h2>
+<ul class="file-list">
+  <li>pkg/variantregistry/ocp.go <span class="lines"><span class="added">+1</span> <span class="removed">&minus;2</span></span></li>
+  <li>pkg/variantregistry/ocp_test.go <span class="lines"><span class="added">+7</span> <span class="removed">&minus;7</span></span></li>
+  <li>config/views.yaml <span class="lines"><span class="added">+8</span> <span class="removed">&minus;90</span></span></li>
+  <li>pkg/variantregistry/snapshot.yaml <span class="lines"><span class="added">+~90</span> <span class="removed">&minus;~90</span></span> (mechanical)</li>
+</ul>
+
+<h2>What This PR Does</h2>
+<p style="color: var(--text-muted); font-size: 0.95rem;">
+  Changes the default OS variant for OCP 5.0 and main/master-branch jobs from <code>rhcos9</code> to <code>rhcos10</code>.
+  Updates component readiness views to match: removes explicit <code>OS: rhcos9</code> filter from 5.0 main views
+  (so both OS variants show up), reworks the 5.0 OS comparison view, and removes the now-obsolete 4.22 OS comparison view.
+</p>
+
+<h2>Activity Since Previous Review</h2>
+<p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.5rem;">No new commits. Discussion since 2026-05-07:</p>
+<div class="card">
+  <div class="card-title"><span class="severity sev-info">Discussion</span> Regression tracking consensus</div>
+  <ul>
+    <li><strong>dgoodwin</strong> (May 8): Flagged relaxed thresholds. "I would probably keep regression tracking on as well." Also: "Everything else looks good. Holding until we hear it's flipped sounds good."</li>
+    <li><strong>neisw</strong> (May 12): Cited TRT-2647 Jira guidance to "minimally monitor that 9 doesn't get worse than 10."</li>
+    <li><strong>dgoodwin</strong> (May 12): "yes tracking would be useful here."</li>
+  </ul>
+  <p style="margin-top: 0.5rem;">Consensus: re-enable <code>regression_tracking</code>. Other relaxed thresholds are intentional per the Jira card.</p>
+</div>
+<div class="card">
+  <div class="card-title"><span class="severity sev-question">New</span> Update jobs need special OS detection</div>
+  <ul>
+    <li><strong>petr-muller</strong> (May 12) on <code>ocp.go</code>: "we'll need the special treatment for update jobs as discussed on slack, right?"</li>
+    <li><strong>neisw</strong> (May 12): "details details..."</li>
+  </ul>
+  <p style="margin-top: 0.5rem;">Update jobs that cross OS boundaries (rhcos9 &rarr; rhcos10) may not be correctly classified by the current <code>setOS()</code> fallback. Acknowledged but not yet addressed.</p>
+</div>
+<div class="card" style="background: transparent; border: 1px dashed var(--border);">
+  <p style="font-size: 0.85rem;">CI: e2e tests triggered and passed (2026-05-12).</p>
+</div>
+
+<h2>Core Logic Change</h2>
+
+<div class="diff-section">
+  <div class="diff-header">pkg/variantregistry/ocp.go:1310&ndash;1319</div>
+  <pre><span class="ctx"> switch {
+ case variants[VariantReleaseMajor] == "4":
+     variants[VariantOS] = "rhcos9"
+ case variants[VariantReleaseMajor] == "5" || isMainBranch:</span>
+<span class="del">-    // OCP 5 currently defaults to rhcos9. Update this when the default changes.
+-    variants[VariantOS] = "rhcos9"</span>
+<span class="add">+    variants[VariantOS] = "rhcos10"</span>
+<span class="ctx"> default:
+     variants[VariantOS] = "unknown"
+ }</span></pre>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="severity sev-ok">OK</span> Logic change is correct</div>
+  <p>The explicit rhcos pattern matching earlier in <code>setOS()</code> still handles jobs that
+  explicitly reference an OS in their name &mdash; this fallback only applies when no explicit
+  OS is found. Clean one-line change, comment removal is appropriate.</p>
+</div>
+
+<h2>View Configuration Changes</h2>
+
+<h3>1. Removing <code>OS:</code> filter from 5.0 main views</h3>
+<div class="card">
+  <div class="card-title"><span class="severity sev-ok">OK</span> 5.0-main, 5.0-rosa, 5.0-main-mass-failure</div>
+  <p>The <code>OS: rhcos9</code> filter was removed entirely from <code>include_variants</code>.
+  This means these views now pick up <strong>all</strong> OS variants (both rhcos9 and rhcos10) by default.</p>
+  <p style="margin-top: 0.5rem;">This answers the author's open question from the PR description &mdash; they went with removing
+  the filter rather than listing both. This is the simpler approach and avoids needing updates
+  when new OS variants appear.</p>
+</div>
+
+<h3>2. Reworked OS comparison view</h3>
+<div class="card">
+  <div class="card-title"><span class="severity sev-question">Question</span> <code>5.0-techpreview-rhcos9-vs-rhcos10</code> &rarr; <code>5.0-rhcos10-vs-rhcos9</code></div>
+  <p>Multiple changes in this view:</p>
+  <ul>
+    <li>Comparison direction swapped: rhcos10 is now the base, rhcos9 is the comparison target. <strong>Correct</strong> &mdash; the new default should be the base.</li>
+    <li><code>FeatureSet: default</code> added alongside <code>techpreview</code> &mdash; broadens scope beyond just techpreview.</li>
+    <li><code>minimum_failure</code>: 3 &rarr; 4</li>
+    <li><code>pity_factor</code>: 5 &rarr; 10</li>
+    <li><code>regression_tracking: enabled: false</code></li>
+    <li><code>include_multi_release_analysis: false</code></li>
+    <li><code>pass_rate_required_new_tests: 90</code> (added)</li>
+  </ul>
+  <p class="comment-ref">dgoodwin flagged this: "looks like it flipped several settings to 'calm things down for a GA branch', is that intentional? I would probably keep regression tracking on as well."</p>
+</div>
+
+<h3>3. Removed <code>4.22-techpreview-rhcos9-vs-rhcos10</code></h3>
+<div class="card">
+  <div class="card-title"><span class="severity sev-ok">OK</span> Obsolete view removed</div>
+  <p>4.22 is OCP 4.x so the rhcos9-vs-rhcos10 comparison is no longer needed there.</p>
+</div>
+
+<h2>Review Findings</h2>
+
+<div class="card">
+  <div class="card-title"><span class="severity sev-question">Open</span> Update jobs need special OS detection</div>
+  <p>petr-muller raised that update jobs crossing OS boundaries (rhcos9 &rarr; rhcos10) may not be
+  correctly classified by the current <code>setOS()</code> fallback. neisw acknowledged but hasn't
+  addressed it in code yet. This is a gap in the current logic.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="severity sev-suggestion">Partially Resolved</span> Relaxed thresholds and disabled regression tracking</div>
+  <p>dgoodwin and neisw agreed that <code>regression_tracking</code> should be re-enabled.
+  The other relaxed thresholds (<code>pity_factor: 10</code>, <code>minimum_failure: 4</code>) are
+  intentional per TRT-2647 Jira card guidance for "minimal monitoring."</p>
+  <p style="margin-top: 0.5rem;"><strong>Action needed:</strong> set <code>regression_tracking: enabled: true</code> in the
+  <code>5.0-rhcos10-vs-rhcos9</code> view before merge.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="severity sev-info">Info</span> Snapshot is mechanical</div>
+  <p>~1600 lines of <code>snapshot.yaml</code> changes are all <code>rhcos9</code> &rarr; <code>rhcos10</code>
+  for 5.0 and main/master branch jobs. Consistent with the logic change. Only
+  affects jobs that don't have an explicit OS in their name (i.e., they hit the fallback path).</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="severity sev-ok">OK</span> Tests updated consistently</div>
+  <p>Seven test cases in <code>ocp_test.go</code> updated to expect <code>rhcos10</code>. All are for 5.0 or
+  main/master branch jobs, matching the logic change exactly.</p>
+</div>
+
+<h2>Review Checklist</h2>
+<ul class="checklist">
+  <li>Core logic change is correct and minimal</li>
+  <li>Explicit OS-in-job-name matching still works (rhcos9 jobs stay rhcos9)</li>
+  <li>5.0 main views now include all OS variants (no filter)</li>
+  <li>OS comparison view direction is semantically correct (new default = base)</li>
+  <li>4.22 comparison view removal is appropriate</li>
+  <li>Tests cover all affected cases</li>
+  <li>Snapshot is consistent with logic change</li>
+  <li>Regression tracking: consensus to re-enable &mdash; waiting on author</li>
+  <li>Update job OS detection: acknowledged gap, not yet addressed</li>
+</ul>
+
+<div class="verdict-box">
+  <h2>Verdict</h2>
+  <p style="font-size: 0.95rem;">
+    The core change is clean and correct. Two open items before merge:
+    (1) re-enable <code>regression_tracking</code> on the OS comparison view (dgoodwin + neisw agreed),
+    (2) address update-job OS detection gap (petr-muller raised, neisw acknowledged).
+    PR remains held with <code>do-not-merge/hold</code> waiting for the upstream default flip.
+  </p>
+  <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+    Last refreshed: 2026-05-14T17:49:43Z &mdash; no code changes since initial review.
+  </p>
+</div>
+
+</body>
+</html>
