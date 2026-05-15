@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: PR #3515 — Fix AI instruction quality and bump apm-cli to 0.13.0</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --heading: #e6edf3;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --orange: #db6d28;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    color: var(--heading);
+    font-size: 1.6rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .pr-meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .pr-meta a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .pr-meta a:hover { text-decoration: underline; }
+
+  h2 {
+    color: var(--heading);
+    font-size: 1.2rem;
+    margin-top: 1.75rem;
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  h3 {
+    color: var(--accent);
+    font-size: 0.95rem;
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .verdict {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .verdict.approve { background: rgba(63, 185, 80, 0.15); color: var(--green); border: 1px solid rgba(63, 185, 80, 0.3); }
+  .verdict.comment { background: rgba(210, 153, 34, 0.15); color: var(--yellow); border: 1px solid rgba(210, 153, 34, 0.3); }
+
+  .severity {
+    display: inline-block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .severity.question { background: var(--yellow); color: #000; }
+  .severity.nit { background: var(--purple); color: #fff; }
+  .severity.good { background: var(--green); color: #fff; }
+
+  p { margin: 0.5rem 0; }
+
+  ul { margin: 0.4rem 0 0.4rem 1.25rem; }
+  li { margin: 0.2rem 0; }
+
+  code {
+    background: rgba(110, 118, 129, 0.15);
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.88em;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+
+  .diff-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.6rem 0.75rem;
+    margin: 0.5rem 0;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.82rem;
+    overflow-x: auto;
+    white-space: pre;
+    line-height: 1.5;
+  }
+
+  .diff-block .del { color: var(--red); }
+  .diff-block .add { color: var(--green); }
+  .diff-block .ctx { color: var(--text-muted); }
+  .diff-block .file { color: var(--accent); font-weight: 600; }
+
+  .finding {
+    border-left: 3px solid var(--border);
+    padding: 0.6rem 0.75rem;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .finding.question {
+    background: rgba(210, 153, 34, 0.06);
+    border-left-color: var(--yellow);
+  }
+
+  .finding.nit {
+    background: rgba(188, 140, 255, 0.06);
+    border-left-color: var(--purple);
+  }
+
+  .finding.positive {
+    background: rgba(63, 185, 80, 0.06);
+    border-left-color: var(--green);
+  }
+
+  .finding strong { color: var(--heading); }
+
+  .file-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.5rem 0;
+  }
+
+  .file-pill {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .summary-grid dt { color: var(--text-muted); }
+  .summary-grid dd { color: var(--text); }
+
+  .scope-bar {
+    display: flex;
+    gap: 0;
+    margin: 0.75rem 0;
+    border-radius: 4px;
+    overflow: hidden;
+    height: 6px;
+  }
+
+  .scope-bar div { height: 100%; }
+  .scope-bar .instruction { background: var(--accent); }
+  .scope-bar .tooling { background: var(--cyan); }
+  .scope-bar .generated { background: var(--text-muted); }
+
+  .scope-legend {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+
+  .scope-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .scope-legend .s-instruction::before { background: var(--accent); }
+  .scope-legend .s-tooling::before { background: var(--cyan); }
+  .scope-legend .s-generated::before { background: var(--text-muted); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin: 0.5rem 0;
+  }
+
+  th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  .footer {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 700px) {
+    body { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #3515: Fix AI instruction quality and bump apm-cli to 0.13.0</h1>
+<div class="pr-meta">
+  <a href="https://github.com/openshift/sippy/pull/3515">github.com/openshift/sippy/pull/3515</a>
+  &middot; Author: not-stbenjam
+  &middot; +617 / -84 (original) +16 / -16 (refresh)
+  &middot; No code changes
+  &middot; <span class="verdict comment">Approve with comments</span>
+  &middot; <span style="color:var(--text-muted);font-size:0.8em">Refreshed 2026-05-15T11:21:45Z</span>
+</div>
+
+<!-- ===== OVERVIEW ===== -->
+<h2>Overview</h2>
+<div class="section">
+  <div class="finding positive" style="margin-bottom:0.75rem">
+    <p><strong>Since previous review (2026-05-15):</strong> apm-cli bumped again 0.12.4 &rarr; 0.13.0 in one additional commit (<code>487ddddcc</code>). Regenerated version strings in <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>GEMINI.md</code>, and their <code>mcp/</code>/<code>sippy-ng/</code> counterparts (8 files, 16 lines changed). No instruction content changed. CI passed.</p>
+  </div>
+  <p>Three categories of changes (original):</p>
+  <ol>
+    <li><strong>Instruction quality fixes</strong> from <a href="https://github.com/stbenjam/skillsaw" style="color:var(--accent)">skillsaw</a> linter: removes hedging language, repositions critical instructions to document boundaries</li>
+    <li><strong>apm-cli 0.11.0 &rarr; 0.12.4</strong>: new config format (<code>target</code> &rarr; <code>targets</code>, explicit <code>dependencies</code> lists), recompiled all generated output</li>
+    <li><strong>New <code>.cursor/commands/</code></strong>: APM now deploys slash commands to Cursor (previously only Claude/OpenCode/Gemini)</li>
+  </ol>
+
+  <div class="scope-bar">
+    <div class="instruction" style="width:15%" title="Instruction quality"></div>
+    <div class="tooling" style="width:10%" title="APM config/tooling"></div>
+    <div class="generated" style="width:75%" title="Generated/recompiled output"></div>
+  </div>
+  <div class="scope-legend">
+    <span class="s-instruction">Instruction edits</span>
+    <span class="s-tooling">APM config/tooling</span>
+    <span class="s-generated">Generated output</span>
+  </div>
+</div>
+
+<!-- ===== CHANGE MAP ===== -->
+<h2>Change Map</h2>
+<div class="section">
+  <table>
+    <thead>
+      <tr><th>Category</th><th>Files</th><th>Nature</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Instruction quality</td>
+        <td>
+          <code>.apm/prompts/sippy-generate-release-views.prompt.md</code><br>
+          <code>.apm/prompts/sippy-update-ga-release-views.prompt.md</code><br>
+          <code>.apm/prompts/sippy-update-job-variant.prompt.md</code><br>
+          <code>.coderabbit.yaml</code>
+        </td>
+        <td>Manual edits &mdash; source of truth</td>
+      </tr>
+      <tr>
+        <td>APM tooling</td>
+        <td>
+          <code>apm.yml</code><br>
+          <code>Makefile</code>
+        </td>
+        <td>Version bump + config format migration</td>
+      </tr>
+      <tr>
+        <td>Generated output</td>
+        <td>
+          <code>.claude/commands/*</code>,
+          <code>.cursor/commands/*</code> (new),
+          <code>.opencode/commands/*</code>,
+          <code>.gemini/commands/*</code>,
+          <code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>GEMINI.md</code>,
+          <code>mcp/CLAUDE.md</code>, <code>mcp/AGENTS.md</code>,
+          <code>sippy-ng/CLAUDE.md</code>, <code>sippy-ng/AGENTS.md</code>,
+          <code>apm.lock.yaml</code>
+        </td>
+        <td>Recompiled from source &mdash; <code>make verify-apm</code></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===== INSTRUCTION CHANGES ===== -->
+<h2>Instruction Changes &mdash; What Moved Where</h2>
+<div class="section">
+  <h3>sippy-generate-release-views</h3>
+  <p>The ga&rarr;now replacement rule was promoted to a blockquote at the top of the document. The two mid-document copies were softened (removed <code>IMPORTANT</code>/<code>CRITICAL</code> markers) to avoid redundancy.</p>
+  <div class="diff-block"><span class="file">sippy-generate-release-views.prompt.md</span>
+<span class="add">+&gt; **IMPORTANT**: When base_release becomes the sample release (not yet GA),</span>
+<span class="add">+&gt; replace 'ga' with 'now' in `relative_start` and `relative_end`</span>
+<span class="ctx"> # Generate Release Views</span>
+<span class="ctx"> ...</span>
+<span class="del">-       - **IMPORTANT**: When base becomes source release, ...</span>
+<span class="add">+       - When base_release becomes the sample release (not yet GA), ...</span></div>
+
+  <h3>sippy-update-ga-release-views</h3>
+  <p>YAML formatting instruction moved from mid-document (between step F and step 4) to the very end.</p>
+  <div class="diff-block"><span class="file">sippy-update-ga-release-views.prompt.md</span>
+<span class="ctx"> Step F...</span>
+<span class="del">-   - **IMPORTANT**: Preserve YAML formatting ...</span>
+<span class="ctx"> 4. **Verify Output**...</span>
+<span class="ctx"> ...</span>
+<span class="ctx"> - This is typically run once when a release goes GA</span>
+<span class="add">+</span>
+<span class="add">+**IMPORTANT**: Preserve YAML formatting (double quotes, `{ }` spacing, indentation)</span></div>
+
+  <h3>sippy-update-job-variant</h3>
+  <p>&ldquo;Pattern Ordering is CRITICAL&rdquo; section moved from mid-document (after &ldquo;Important Notes&rdquo;) to end (after &ldquo;Helper Commands&rdquo;). Inline step 4 softened.</p>
+  <div class="diff-block"><span class="file">sippy-update-job-variant.prompt.md (step 4, inline)</span>
+<span class="del">-   - **CRITICAL**: Pay special attention to pattern ordering!</span>
+<span class="del">-     - More specific patterns MUST come before more generic patterns</span>
+<span class="add">+   - Pay special attention to pattern ordering!</span>
+<span class="add">+     - More specific patterns come before more generic patterns</span></div>
+</div>
+
+<!-- ===== FINDINGS ===== -->
+<h2>Findings</h2>
+<div class="section">
+
+  <!-- Finding 1 -->
+  <div class="finding question">
+    <p><span class="severity question">question</span> <strong>.coderabbit.yaml &mdash; hedging removal may be too aggressive</strong></p>
+    <p>Two changes turn soft guidelines into hard requirements that CodeRabbit will enforce on every PR:</p>
+    <div class="diff-block"><span class="file">.coderabbit.yaml:40</span>
+<span class="del">-        should ideally stay under 200 lines; extract sub-queries or CTEs into</span>
+<span class="add">+        must stay under 200 lines; extract sub-queries or CTEs into</span></div>
+    <div class="diff-block"><span class="file">.coderabbit.yaml:108</span>
+<span class="del">-          New or modified functionality should include test coverage where possible:</span>
+<span class="add">+          New or modified functionality must include test coverage:</span></div>
+    <p><strong>200-line limit:</strong> Some query-building functions may legitimately need more than 200 lines. With &ldquo;must&rdquo;, CodeRabbit will flag all of them as violations rather than suggestions.</p>
+    <p><strong>Test coverage:</strong> The removed qualifier &ldquo;where possible&rdquo; was doing useful work &mdash; config-only changes, documentation PRs, and view YAML updates don&rsquo;t need tests. With &ldquo;must&rdquo;, CodeRabbit will flag those PRs too.</p>
+    <p>Is the intent to make CodeRabbit noisier here, or was this an overzealous lint fix? Consider keeping &ldquo;should&rdquo; (without &ldquo;ideally&rdquo;) as a middle ground.</p>
+  </div>
+
+  <!-- Finding 2 -->
+  <div class="finding nit">
+    <p><span class="severity nit">nit</span> <strong>Missing trailing newlines</strong></p>
+    <p>Multiple files end without a trailing newline (visible as <code>\ No newline at end of file</code> in the diff). This affects:</p>
+    <div class="file-list">
+      <span class="file-pill">.claude/commands/sippy-update-ga-release-views.md</span>
+      <span class="file-pill">.claude/commands/sippy-update-job-variant.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-app.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-frontend.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-migrate.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-regression-cache.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-serve.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-setup.md</span>
+      <span class="file-pill">.cursor/commands/sippy-dev-tests.md</span>
+      <span class="file-pill">.cursor/commands/sippy-generate-release-views.md</span>
+      <span class="file-pill">.cursor/commands/sippy-update-ga-release-views.md</span>
+      <span class="file-pill">.cursor/commands/sippy-update-job-variant.md</span>
+      <span class="file-pill">.opencode/commands/sippy-update-ga-release-views.md</span>
+      <span class="file-pill">.opencode/commands/sippy-update-job-variant.md</span>
+    </div>
+    <p>Some of these are pre-existing; others are new. If skillsaw catches instruction quality issues, this seems like a reasonable thing for it or APM to fix too.</p>
+  </div>
+
+  <!-- Finding 3 -->
+  <div class="finding nit">
+    <p><span class="severity nit">nit</span> <strong>sippy-update-job-variant: softened inline may read as informational</strong></p>
+    <p>The inline step 4 now says <em>&ldquo;More specific patterns come before more generic patterns&rdquo;</em> &mdash; this reads as a description of the current state rather than a requirement. The emphatic version is preserved in the end-of-file section, so an LLM will likely still follow it. But lowercase &ldquo;must&rdquo; in the inline version would be unambiguous without being noisy:</p>
+    <div class="diff-block"><span class="ctx">     - More specific patterns must come before more generic patterns</span></div>
+  </div>
+
+</div>
+
+<!-- ===== POSITIVE ===== -->
+<h2>What Looks Good</h2>
+<div class="section">
+  <div class="finding positive">
+    <p><span class="severity good">good</span> <strong>Instruction repositioning is well-reasoned and consistent.</strong>
+    Critical instructions are placed at document boundaries (top blockquote or bottom section) where LLMs attend most. Mid-document copies are softened to avoid redundancy rather than deleted, so the information is still present in context.</p>
+  </div>
+
+  <div class="finding positive">
+    <p><span class="severity good">good</span> <strong>Cross-editor consistency.</strong>
+    All changes propagate identically across <code>.claude/</code>, <code>.cursor/</code>, <code>.opencode/</code>, <code>.gemini/</code>, and <code>.apm/</code> source prompts. The new <code>.cursor/commands/</code> directory brings Cursor to parity with the other editors.</p>
+  </div>
+
+  <div class="finding positive">
+    <p><span class="severity good">good</span> <strong>APM version bump is clean.</strong>
+    Config format migration (<code>target</code> &rarr; <code>targets</code>) is straightforward. Lock file hashes are updated. Build IDs are no longer <code>__BUILD_ID__</code> placeholder strings.</p>
+  </div>
+
+  <div class="finding positive">
+    <p><span class="severity good">good</span> <strong>No code changes.</strong>
+    The blast radius is limited to AI configuration and tooling. No risk of runtime regression.</p>
+  </div>
+</div>
+
+<!-- ===== VERDICT ===== -->
+<h2>Verdict</h2>
+<div class="section">
+  <p><span class="verdict comment">Approve with comments</span></p>
+  <p>Clean PR with no code changes and a well-reasoned approach to instruction positioning. The <code>.coderabbit.yaml</code> hedging removal (Finding #1) is the only item worth discussing &mdash; it will make CodeRabbit reviews noisier for legitimate cases where tests aren&rsquo;t needed or where a query function exceeds 200 lines. The other findings are minor nits.</p>
+
+  <table>
+    <thead><tr><th>Finding</th><th>Severity</th><th>Action needed?</th></tr></thead>
+    <tbody>
+      <tr><td>.coderabbit.yaml hedging removal</td><td><span class="severity question">question</span></td><td>Discuss: intentional or overzealous?</td></tr>
+      <tr><td>Missing trailing newlines</td><td><span class="severity nit">nit</span></td><td>Optional, partially pre-existing</td></tr>
+      <tr><td>Softened inline pattern ordering</td><td><span class="severity nit">nit</span></td><td>Optional, end-of-file version compensates</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  Review generated 2026-05-15 &middot; Refreshed 2026-05-15T11:21:45Z &middot; openshift/sippy#3515
+</div>
+
+</body>
+</html>
