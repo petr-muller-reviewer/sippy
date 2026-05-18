@@ -21,9 +21,13 @@
   .should-fix { background: #fff8c5; color: #9a6700; }
   .nit { background: #ddf4ff; color: #0969da; }
   .question { background: #f6f8fa; color: #57606a; }
+  .resolved { background: #dafbe1; color: #116329; }
+  .update-note { background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9em; }
   ul { padding-left: 1.4rem; }
   li { margin-bottom: .3rem; }
   a { color: #0969da; }
+  .resolved-item { opacity: 0.7; }
+  .resolved-item h3 { text-decoration: line-through; }
 </style>
 </head>
 <body>
@@ -33,14 +37,19 @@
 <div class="meta">
   <dl>
     <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3532">openshift/sippy#3532</a></dd>
-    <dt>Head SHA:</dt><dd><code>171fc894547e0fdb0dc9e38a82cdd18754c8a845</code></dd>
+    <dt>Head SHA:</dt><dd><code>9039e19b54d847f5ba5add5441ee1d8b61951638</code></dd>
     <dt>Base:</dt><dd>master</dd>
-    <dt>Reviewed:</dt><dd>2026-05-15T15:14:33Z</dd>
+    <dt>Reviewed:</dt><dd>2026-05-18T18:07:16Z</dd>
+    <dt>Previous SHA:</dt><dd><code>171fc894547e0fdb0dc9e38a82cdd18754c8a845</code></dd>
   </dl>
 </div>
 
+<div class="update-note">
+  <strong>Since previous review:</strong> 1 new commit (<code>9039e19b5</code> &mdash; "TRT-1989: clean up gorm annotations"). Touches <code>pkg/db/models/prow.go</code> only (7 lines changed). Removes the broken <code>expression:</code> index tags and invalid <code>varchar(10)</code> GORM type tags from all new fields. Both blocking findings are resolved. CI tests passed.
+</div>
+
 <div class="verdict">
-  <strong>Needs discussion</strong> &mdash; The expression index GORM tags on two new fields reference a column name that doesn't exist on their respective tables. This likely causes AutoMigrate failures or creates semantically wrong indexes. Should be confirmed and fixed before merge.
+  <strong>Needs discussion</strong> &mdash; The two blocking expression-index issues are fixed. Remaining items: <code>ProwJobRunTest.ProwJobID</code> should probably have an index, and the backfill strategy for existing rows should be clarified.
 </div>
 
 <h2>What this PR does</h2>
@@ -53,11 +62,6 @@
 </ul>
 
 <h2>Findings</h2>
-
-<h3><span class="severity blocking">Blocking</span> Expression index tags reference nonexistent column</h3>
-<p><code>pkg/db/models/prow.go:96</code></p>
-<pre><code>ProwJobRunTimestamp time.Time `gorm:"expression:DATE(timestamp AT TIME ZONE 'UTC')"`</code></pre>
-<p>The expression references <code>timestamp</code>, which is a column on <code>prow_job_runs</code>, not on <code>prow_job_run_tests</code>. The actual column GORM will create for this field is <code>prow_job_run_timestamp</code>. This will either fail during AutoMigrate or create an expression index with wrong semantics. The same issue exists at line 120 for <code>ProwJobRunTestOutput.ProwJobRunTestTimestamp</code>.</p>
 
 <h3><span class="severity should-fix">Should fix</span> Missing index on ProwJobRunTest.ProwJobID</h3>
 <p><code>pkg/db/models/prow.go:94</code></p>
@@ -72,18 +76,30 @@ ProwJobID uint</code></pre>
 <h3><span class="severity nit">Nit</span> PR description / code name mismatch</h3>
 <p>PR description says "ProwJobRunStartTime" but the field is actually <code>ProwJobRunTimestamp</code>.</p>
 
+<h2>Resolved</h2>
+
+<div class="resolved-item">
+<h3><span class="severity resolved">Resolved</span> Expression index tags reference nonexistent column</h3>
+<p><code>pkg/db/models/prow.go:96</code> &mdash; Fixed by <code>9039e19b5</code>: removed the <code>expression:DATE(timestamp AT TIME ZONE 'UTC')</code> tags entirely from <code>ProwJobRunTimestamp</code> and <code>ProwJobRunTestTimestamp</code>.</p>
+</div>
+
+<div class="resolved-item">
+<h3><span class="severity resolved">Resolved</span> Same expression index bug on ProwJobRunTestOutput</h3>
+<p><code>pkg/db/models/prow.go:120</code> &mdash; Fixed by same commit <code>9039e19b5</code>.</p>
+</div>
+
 <h2>Things I checked and found fine</h2>
 <ul>
   <li>The loader correctly threads <code>prowJobRelease</code> and <code>pj.Status.StartTime</code> through <code>prowJobRunTestsFromGCS</code> and <code>extractTestCases</code>.</li>
   <li>Seed data populates all new fields with values consistent with the parent objects.</li>
   <li>Test fixtures in <code>job_runs_test.go</code> and <code>pr_new_tests_worker_test.go</code> updated to include new required fields.</li>
   <li>No existing queries are modified &mdash; purely additive schema change, low regression risk.</li>
-  <li>Hierarchical naming convention across tables (<code>ProwJobRelease</code> &rarr; <code>ProwJobRunRelease</code> &rarr; <code>ProwJobRunTestRelease</code>) is consistent and intentional for partitioning keys.</li>
+  <li>Hierarchical naming convention across tables is consistent and intentional for partitioning keys.</li>
+  <li>New commit also removed invalid <code>varchar(10)</code> GORM type tags from all release string fields (including the pre-existing <code>ProwJob.Release</code>).</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
-  <li>Have you tested that AutoMigrate succeeds with the expression index tags as written? The <code>timestamp</code> reference in the expression appears to target the wrong table's column.</li>
   <li>Is the backfill for existing rows planned as a separate migration, or will it be part of the partitioning PR?</li>
   <li>Should <code>ProwJobRunTest.ProwJobID</code> have an index tag given its stated purpose of avoiding joins?</li>
 </ul>
