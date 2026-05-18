@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3533</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; background: #fff; padding: 2rem; }
+  .container { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.25rem; }
+  p, li { margin-bottom: 0.4rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 0.5rem 0 1rem; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-left: 0; margin-right: 1.5rem; }
+  .refresh-log { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 0.75rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.875rem; }
+  .refresh-log strong { display: block; margin-bottom: 0.25rem; }
+  .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.5rem; text-transform: uppercase; vertical-align: middle; }
+  .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.nit { background: #ddf4ff; color: #0550ae; }
+  .severity.resolved { background: #dafbe1; color: #1a7f37; }
+  .finding { margin-bottom: 1.5rem; border-left: 3px solid #d0d7de; padding-left: 1rem; }
+  .finding.should-fix { border-left-color: #d4a72c; }
+  .finding.nit { border-left-color: #54aeff; }
+  .finding.resolved { border-left-color: #2da44e; opacity: 0.75; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: TRT-1989: add benchmarking db query tests</h1>
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3533">openshift/sippy#3533</a></dd>
+    <dt>Head SHA:</dt><dd><code>fe42ba08360d9a2bb2c959421c562010a5e1b943</code></dd>
+    <dt>Base:</dt><dd>master</dd>
+    <dt>Reviewed:</dt><dd>2026-05-18T15:16:19Z</dd>
+  </dl>
+</div>
+
+<div class="refresh-log">
+  <strong>Refreshed 2026-05-18 from 7eaee42 → fe42ba08</strong>
+  3 new commits. Only <code>pkg/flags/postgres_benchmarking_test.go</code> changed (+254/-25): added 7 new benchmark cases, <code>benchmarkResult</code> struct, <code>printSummaryTable</code>, <code>runBenchmarkCase</code> helper, iterations bumped to 3, two new test entry points.
+</div>
+
+<div class="verdict">
+  <strong>Verdict: Approve</strong>
+  <p>The refactoring is clean and the benchmarks are properly gated. The new commits significantly improve the benchmark framework and expand coverage. Remaining suggestions are quality-of-life improvements, none blocking.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Extracts the ProwJobRun database query from <code>PrintJobDetailsReportFromDB</code> into a new exported <code>JobDetailsReport</code> function, separating query logic from HTTP response handling.</li>
+  <li>Adds a benchmark test file gated behind <code>db_benchmarking_dsn</code> env var — skips in CI.</li>
+  <li>Benchmarks 10+ query patterns: <code>FindTestsByRelease</code>, <code>TestDurations</code>, <code>TestOutputs</code>, <code>JobDetails</code>, <code>TestAnalysisOverall</code>, <code>TestAnalysisByJob</code> (with and without variant filter), lookback count queries (14d/9d), and pass-rate analysis.</li>
+  <li>Since previous review: added <code>benchmarkResult</code> struct (min/max/avg/total), <code>runBenchmarkCase</code> and <code>printSummaryTable</code> helpers; iterations bumped to 3; new <code>Test_BenchmarkFindTestsByRelease</code> and <code>Test_BenchmarkCombined</code> entry points; <code>benchmarkJobName</code> constant extracted.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Resolved</h3>
+
+<div class="finding resolved">
+  <p><span class="severity resolved">resolved</span> <strong>Custom timing framework — sufficiently improved</strong></p>
+  <p>Original concern: duplicated timing with <code>fmt.Printf</code>, iterations hardcoded to 1. New code adds <code>benchmarkResult</code> with min/max/avg/total, <code>runBenchmarkCase</code> helper, <code>printSummaryTable</code>, and bumps iterations to 3. Still not <code>testing.B</code> / <code>benchstat</code>, but the custom framework is now genuinely useful.</p>
+</div>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <p><span class="severity should-fix">should fix</span> <strong>Hardcoded release, test name, and job name constants will rot</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go:15-17</code></p>
+  <pre><code>const benchmarkRelease = "4.22"
+const benchmarkTestName = "[Monitor:legacy-test-framework-invariants-pathological][sig-arch] events should not repeat pathologically for ns/kube-system"
+const benchmarkJobName = "periodic-ci-openshift-release-main-ci-4.22-e2e-aws-ovn"</code></pre>
+  <p>All three become stale as releases advance. Someone will waste time debugging why benchmarks return zero results. Make them configurable via env var (like <code>db_benchmarking_dsn</code> already is), or document that they need periodic updates.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>DB client never closed — leaked connections</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>getBenchmarkDBClient</code></p>
+  <pre><code>dbc, err := dbFlags.GetDBClient()
+if err != nil {
+    t.Fatalf("couldn't get DB client: %v", err)
+}
+return dbc</code></pre>
+  <p>The helper opens a DB connection but registers no <code>t.Cleanup</code> to close it. Unlikely to matter in practice for a manual benchmark tool, but a <code>t.Cleanup(func() { dbc.DB.Close() })</code> is good hygiene. (CodeRabbit also flagged this.)</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>Direct map index into <code>getIndividualBenchmarkCases()</code> can panic</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>Test_BenchmarkFindTestsByRelease</code></p>
+  <pre><code>bc := getIndividualBenchmarkCases()["FindTestsByRelease"]
+r := runBenchmarkCase(t, dbc, bc, iterations)</code></pre>
+  <p>If the key drifts (rename, typo), <code>bc</code> is a zero-value <code>benchmarkCase</code> and <code>bc.fn</code> is nil — calling it panics with no useful message. Use a comma-ok check and <code>t.Fatal</code> on miss.</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>Multiple benchmark cases use raw SQL not present in production</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>FindTestsByRelease</code>, <code>TestCountsByLookback14ForRelease</code>, <code>TestCountsByLookback9ForRelease</code>, <code>TestAnalysisPassRate</code></p>
+  <p>Four cases embed raw SQL inline rather than calling production query functions. They benchmark queries that won't be optimized alongside production code. <code>TestAnalysisPassRate</code> uses <code>query.QueryTestAnalysis</code> (a real constant), which is better, but the call site still isn't the real production code path.</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>Per-row logging included in benchmark timing</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>FindTestsByRelease</code> fn body</p>
+  <pre><code>for _, r := range results {
+    log.Printf("  [%d] %s", r.ID, r.Name)
+}</code></pre>
+  <p>This runs inside the timed section, adding I/O noise to the measured query duration.</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong><code>Test_BenchmarkGroup</code> still uses <code>iterations := 1</code></strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>Test_BenchmarkGroup</code></p>
+  <p>All other tests were bumped to 3 iterations; <code>Test_BenchmarkGroup</code> keeps 1. Likely intentional (group runs are expensive), but worth a comment if so.</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong><code>Test_BenchmarkCombined</code> runs <code>FindTestsByRelease</code> twice</strong></p>
+  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>Test_BenchmarkCombined</code></p>
+  <p>It iterates both <code>getBenchmarkCases()</code> and <code>getIndividualBenchmarkCases()</code>, so <code>FindTestsByRelease</code> appears twice in the combined summary table — confusing when reading results.</p>
+</div>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>Test file placement in <code>pkg/flags</code></strong></p>
+  <p>This file tests queries from <code>pkg/api</code> and <code>pkg/db/query</code> but lives in <code>pkg/flags</code>. The only <code>pkg/flags</code> dependency is <code>PostgresFlags.GetDBClient()</code>. Precedent exists (<code>component_readiness_test.go</code>), so not blocking.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li><code>JobDetailsReport</code> extraction is mechanically correct — same query, same field ordering, caller delegates properly.</li>
+  <li>Error handling preserved: <code>PrintJobDetailsReportFromDB</code> logs and returns the error from <code>JobDetailsReport</code>.</li>
+  <li>Removed comment about magic number 12 is pre-existing, not introduced here.</li>
+  <li>Tests gated behind <code>db_benchmarking_dsn</code> env var — skip in CI and normal <code>make test</code>.</li>
+  <li>No changes to any API contract or response format.</li>
+  <li><code>runBenchmarkCase</code> properly resets min on first iteration (<code>i == 0</code> check).</li>
+  <li><code>printSummaryTable</code> sorts by avg descending — useful for identifying slowest queries at a glance.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the intent to run these manually against a prod-like DB before and after optimization? If so, <code>benchstat</code> on <code>testing.B</code> output would give statistically meaningful comparisons.</li>
+  <li>Should the raw SQL benchmark cases be extracted into production query functions for consistency with the other cases?</li>
+</ul>
+
+</div>
+</body>
+</html>
