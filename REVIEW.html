@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3534</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2328; background: #fff; padding: 2rem; }
+  .container { max-width: 54rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d1d9e0; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.4rem; }
+  p, li { margin-bottom: 0.4rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 0.5rem 0 1rem; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { background: #f6f8fa; border: 1px solid #d1d9e0; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-left: 0; margin-right: 1.5rem; }
+  .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .verdict.approve { background: #dafbe1; border-color: #aceebb; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4rem; text-transform: uppercase; vertical-align: middle; }
+  .severity-nit { background: #ddf4ff; color: #0969da; }
+  .severity-question { background: #fff8c5; color: #6a5304; }
+  .where { color: #656d76; font-size: 0.85rem; margin-bottom: 0.3rem; }
+  .checked li { color: #1a7f37; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: TRT-1989 &mdash; add go_partman</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3534">openshift/sippy#3534</a></dd>
+    <dt>Head SHA:</dt><dd><code>299278a70d2cd97fff21a975868c333d192d8e76</code></dd>
+    <dt>Base:</dt><dd>master</dd>
+    <dt>Reviewed:</dt><dd>2026-05-18T00:39:27Z</dd>
+  </dl>
+</div>
+
+<div class="verdict approve">
+  <strong>Verdict: Approve</strong>
+  <p>Well-structured integration of partition management. The vendor patch is thoroughly documented, error handling degrades gracefully, and the security-sensitive DDL construction in sippy-owned code properly validates inputs. The findings below are nits and questions, none blocking.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Wraps the <code>go_partman</code> library in <code>pkg/db/partitionmanager/</code>, bridging GORM to go_partman's sqlx-based API.</li>
+  <li>Integrates into the <strong>load path</strong>: calls <code>Maintain()</code> for forward-looking partitions, then <code>EnsurePartition()</code> per historical date being imported.</li>
+  <li>Integrates into the <strong>serve path</strong>: starts a background goroutine running <code>Maintain()</code> on a 1-hour ticker.</li>
+  <li>Patches vendored go_partman to handle non-multi-tenant tables (inserts a default empty-string tenant row).</li>
+  <li>Adds E2E tests covering partition creation, idempotency, data routing, retention-based cleanup, and SQL injection rejection.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity severity-nit">nit</span> dropPartition in go_partman uses unquoted identifiers</h3>
+<p class="where"><code>vendor/github.com/jirevwe/go_partman/queries.go:105</code></p>
+<p><code>DROP TABLE IF EXISTS %s.%s;</code> interpolates schema and table name without quoting. Values come from <code>pg_tables</code> (database-controlled, not user-controlled), so this is not exploitable in practice. But it diverges from sippy's own <code>EnsurePartition</code> which properly quotes identifiers. Worth noting in the vendor patch doc or as an upstream issue.</p>
+<pre><code>var dropPartition = `DROP TABLE IF EXISTS %s.%s;`</code></pre>
+
+<h3><span class="severity severity-nit">nit</span> Maintain() + EnsurePartition() dual strategy lacks comment</h3>
+<p class="where"><code>pkg/dataloader/prowloader/prow.go:379-406</code></p>
+<p><code>Maintain()</code> creates future partitions and drops expired ones; <code>EnsurePartition()</code> then handles the specific historical date being imported. This two-tier approach is correct but non-obvious. A brief comment at line 379 explaining why both calls are needed would help future readers understand the forward-looking vs. historical-backfill distinction.</p>
+<pre><code>if pl.partMgr != nil {
+    if err := pl.partMgr.Maintain(ctx); err != nil {
+        log.WithError(err).Warn("partition manager maintenance failed, will create partitions on demand")
+    }
+}
+// ... later, per date:
+if err := partitionmanager.EnsurePartition(pl.dbc.DB, "test_analysis_by_job_by_dates", dateToImport, nextDay); err != nil {</code></pre>
+
+<h3><span class="severity severity-question">question</span> context.Background() in serve.go partition manager startup</h3>
+<p class="where"><code>cmd/sippy/serve.go:261</code></p>
+<p>Creates a new <code>context.Background()</code> rather than deriving from the command's context. If the cobra command has signal-handling context, the partition manager won't respond to graceful shutdown signals through context cancellation &mdash; only via <code>defer partMgr.Stop()</code>. This may be intentional (Stop() is the primary shutdown mechanism) but worth confirming.</p>
+<pre><code>ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+if startErr := partMgr.Start(ctx); startErr != nil {</code></pre>
+
+<h3><span class="severity severity-question">question</span> 365-day retention default</h3>
+<p class="where"><code>pkg/db/partitionmanager/manager.go:36</code></p>
+<p><code>RetentionPeriod: 365 * 24 * time.Hour</code> &mdash; is this aligned with the existing data lifecycle for <code>test_analysis_by_job_by_dates</code>? If no prior pruning policy existed, 365 days is reasonable, but should be confirmed against actual usage patterns.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li><code>EnsurePartition</code> validates table names via <code>validIdentifier</code> regex and dates via <code>time.Parse</code> before DDL string interpolation &mdash; safe against SQL injection.</li>
+  <li>Vendor patch doc (<code>SIPPY_VENDOR_PATCHES.md</code>) thoroughly documents the empty-string tenant fix with a guard-condition analysis across all go_partman code paths.</li>
+  <li>Graceful degradation: partition manager failures are logged as warnings, never fatal, in both load and serve paths.</li>
+  <li>E2E tests cover create, idempotent re-create, data routing through parent table, retention-based drop, invalid table name rejection (<code>robert'; DROP TABLE students;--</code>), and invalid date rejection.</li>
+  <li><code>dropPartmanState</code> cleanup in tests properly records errors via <code>t.Logf</code> instead of silently ignoring them (latest commit).</li>
+  <li>Embedded web assets placeholder resolves the <code>//go:embed web/dist</code> build failure without pulling in unused UI code.</li>
+  <li>The <code>logrusLogger</code> bridge correctly implements all methods of go_partman's <code>Logger</code> interface.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is <code>context.Background()</code> in <code>serve.go:261</code> intentional, or should the partition manager derive its context from the cobra command's context for signal-aware shutdown?</li>
+  <li>Does the 365-day retention period match the expected data lifecycle? Is there an existing pruning policy this should align with?</li>
+</ul>
+
+</div>
+</body>
+</html>
