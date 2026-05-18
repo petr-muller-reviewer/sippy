@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3334 — Trt-1989: partition management</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1f2328; background: #fff; padding: 2rem; }
+  .container { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d1d9e0; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.4rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.8125rem; background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.5rem 0 1rem; line-height: 1.5; border: 1px solid #d1d9e0; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { background: #f6f8fa; border: 1px solid #d1d9e0; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.875rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-right: 1.5rem; }
+  .verdict { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .verdict strong { color: #9a6700; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; text-transform: uppercase; }
+  .blocking { background: #ffebe9; color: #cf222e; border: 1px solid #cf222e; }
+  .should-fix { background: #fff8c5; color: #9a6700; border: 1px solid #d4a72c; }
+  .nit { background: #ddf4ff; color: #0969da; border: 1px solid #54aeff; }
+  .question { background: #f6f8fa; color: #656d76; border: 1px solid #d1d9e0; }
+  .finding { margin-bottom: 1.5rem; padding-left: 0.75rem; border-left: 3px solid #d1d9e0; }
+  .finding-blocking { border-left-color: #cf222e; }
+  .finding-should-fix { border-left-color: #d4a72c; }
+  .finding-nit { border-left-color: #54aeff; }
+  .finding-question { border-left-color: #d1d9e0; }
+  .where { font-size: 0.8125rem; color: #656d76; margin-bottom: 0.25rem; }
+  .checked li { color: #1a7f37; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: openshift/sippy#3334</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3334">openshift/sippy#3334</a></dd>
+    <dt>Title:</dt><dd>Trt-1989: partition management</dd>
+    <dt>Head SHA:</dt><dd><code>dd5ebf5b038eb247d60a11ad350f5edd949a1194</code></dd>
+    <dt>Base:</dt><dd>master</dd>
+    <dt>Reviewed:</dt><dd>2026-05-18T16:00:20Z</dd>
+    <dt>Author:</dt><dd>neisw</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Needs discussion</strong> &mdash; The partition management infrastructure is well-built with good safety measures, but there are two blocking issues: a copy-paste bug in range display and unclear migration sequencing for the model PK change. Several should-fix items around error handling and logging also need attention before merge.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds automated partition lifecycle management to the ProwLoader: creates future partitions, detaches old ones after 95 days, drops detached ones after 100 days.</li>
+  <li>Introduces a multi-step migration workflow (<code>MigrateToPartitionedTable</code> &rarr; <code>UpdatePartitionedTableMigration</code> &rarr; <code>FinalizePartitionedTableMigration</code>) for converting existing tables to partitioned ones.</li>
+  <li>Provides comprehensive partition utilities: listing, stats, retention validation, attach/detach/drop operations with safety checks.</li>
+  <li>Adds schema utilities for table column verification, FK relationship analysis and migration, atomic table renaming with sequence/constraint/index renaming.</li>
+  <li>Changes <code>ProwJobRunTest</code> and <code>ProwJobRunTestOutput</code> models from <code>gorm.Model</code> to explicit fields with composite PK <code>(id, created_at)</code> to support range partitioning.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+
+<div class="finding finding-blocking">
+  <h3><span class="severity blocking">blocking</span> OldestDate used where NewestDate intended</h3>
+  <div class="where"><code>pkg/dataloader/prowloader/prow.go:443</code></div>
+  <p>Copy-paste error. The end-of-range display reads <code>stats.OldestDate.Time</code> inside a block guarded by <code>stats.NewestDate.Valid</code>. The partition range display will show the oldest date twice instead of showing oldest-to-newest.</p>
+  <pre>if stats.NewestDate.Valid {
+    endRange = stats.<span style="background:#ffebe9;font-weight:bold">OldestDate</span>.Time.Format("2006-01-02")  // should be NewestDate
+}</pre>
+</div>
+
+<div class="finding finding-blocking">
+  <h3><span class="severity blocking">blocking</span> Model PK change needs migration sequencing clarity</h3>
+  <div class="where"><code>pkg/db/models/prow.go:86-92, 109-115</code></div>
+  <p>Removing <code>gorm.Model</code> and switching the PK from <code>(id)</code> to <code>(id, created_at)</code> is a breaking schema change for the existing non-partitioned tables. The comments on both structs say <em>"Do not update until after partitions have been enabled"</em>, yet this PR updates them. If GORM's auto-migrate runs against the existing table before the partition migration completes, it will attempt to alter the PK on a production table with hundreds of millions of rows.</p>
+  <pre>// Do not update until after partitions have been enabled
+// Remove gorm.model on Partitioned tables so we can manage the primary key and index
+type ProwJobRunTest struct {
+    ID        uint      `gorm:"primaryKey;autoIncrement"`
+    CreatedAt time.Time `gorm:"<span style="background:#ffebe9;font-weight:bold">primaryKey</span>;index"`</pre>
+  <p>The PR needs to clarify: does the partition migration run before this code deploys? Is auto-migrate disabled for these tables? What prevents this from breaking the existing schema?</p>
+</div>
+
+<h3>Should Fix</h3>
+
+<div class="finding finding-should-fix">
+  <h3><span class="severity should-fix">should fix</span> fmt.Printf in production code</h3>
+  <div class="where"><code>pkg/dataloader/prowloader/prow.go:431, 445</code></div>
+  <p><code>preparePartitions</code> uses <code>fmt.Printf</code> instead of <code>log.Infof</code>. This bypasses structured logging and won't appear in log aggregation systems. Every other function in this PR correctly uses logrus.</p>
+  <pre>fmt.Printf("  Total: %d partitions (%s)\n", stats.TotalPartitions, stats.TotalSizePretty)
+...
+fmt.Printf("  Range: %s to %s\n", startRange, endRange)</pre>
+</div>
+
+<div class="finding finding-should-fix">
+  <h3><span class="severity should-fix">should fix</span> Partition failure blocks all data loading</h3>
+  <div class="where"><code>pkg/dataloader/prowloader/prow.go:232-243</code></div>
+  <p>Any partition management error &mdash; including failing to detach a 95-day-old partition &mdash; aborts the entire load cycle. A failure to clean up old data should not prevent loading new data. Consider separating aging failures (detach/drop) from preparation failures (create new partitions), and only blocking on the latter.</p>
+  <pre>for _, config := range partitionConfigs {
+    err := pl.updatePartitions(config)
+    if err != nil {
+        pl.errors = append(pl.errors, err)
+        <span style="background:#fff8c5">return</span>  // blocks ALL loading
+    }
+}</pre>
+</div>
+
+<div class="finding finding-should-fix">
+  <h3><span class="severity should-fix">should fix</span> Incomplete composite index idx_pjrt_run_test_status</h3>
+  <div class="where"><code>pkg/db/models/prow.go:94, 101</code></div>
+  <p>The composite index <code>idx_pjrt_run_test_status</code> has <code>priority:1</code> on <code>ProwJobRunID</code> and <code>priority:3</code> on <code>Status</code>, with no <code>priority:2</code> column. Either a column is missing or the priorities are wrong. GORM will create a two-column index but the gap in priorities is suspicious.</p>
+  <pre>ProwJobRunID uint `gorm:"index;index:idx_pjrt_run_test_status,<span style="background:#fff8c5">priority:1</span>"`
+...
+Status   int `gorm:"index;...;index:idx_pjrt_run_test_status,<span style="background:#fff8c5">priority:3</span>"`</pre>
+</div>
+
+<div class="finding finding-should-fix">
+  <h3><span class="severity should-fix">should fix</span> OnDelete:CASCADE on soon-to-be-partitioned table</h3>
+  <div class="where"><code>pkg/db/models/prow.go:106</code></div>
+  <p><code>ProwJobRunTestOutput</code> still declares <code>constraint:OnDelete:CASCADE</code>, but this PR explicitly discusses removing FK cascades for partitioned tables. PostgreSQL cannot enforce cascading deletes across partitions in the standard way. Is this constraint declaration still correct?</p>
+  <pre>ProwJobRunTestOutput *ProwJobRunTestOutput `gorm:"constraint:OnDelete:CASCADE;"`</pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding finding-nit">
+  <h3><span class="severity nit">nit</span> Dev note left in unrelated code</h3>
+  <div class="where"><code>pkg/dataloader/prowloader/prow.go:1359</code></div>
+  <p>This comment reads like a personal observation rather than a code comment. If it identifies a real issue, it should be tracked; otherwise, remove it.</p>
+  <pre>// interesting that we rely on created_at here which is when we imported the test, not when the test ran</pre>
+</div>
+
+<div class="finding finding-nit">
+  <h3><span class="severity nit">nit</span> Documentation-only tests that verify nothing</h3>
+  <div class="where"><code>pkg/db/utils_test.go:230-480</code>, <code>pkg/db/partitions_test.go:207-540</code></div>
+  <p>Several test functions (<code>TestSyncIdentityColumn</code>, <code>TestMigrateTableDataRange</code>, <code>TestVerifyPartitionCoverage</code>, <code>TestRenameTables</code>, <code>TestColumnDeduplication</code>) contain only comments and <code>t.Log()</code>. They document expected behavior but assert nothing. These should be real integration tests or moved to godoc.</p>
+</div>
+
+<div class="finding finding-nit">
+  <h3><span class="severity nit">nit</span> Very large new files</h3>
+  <div class="where"><code>pkg/db/partitions.go</code> (2116 lines), <code>pkg/db/utils.go</code> (2159 lines)</div>
+  <p>Each file is 2100+ lines. FK operations, sequence operations, table rename logic, and column verification could be split into separate files for maintainability.</p>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding finding-question">
+  <h3><span class="severity question">question</span> DeleteTestsByName in a single transaction</h3>
+  <div class="where"><code>pkg/db/migration.go:682-731</code></div>
+  <p>This deletes from 6 tables in a single transaction using LIKE patterns. For production-sized data (millions of matching rows), this could hold locks for extended periods and cause replication lag. Is this intended for one-off maintenance only, or could it run during normal operations?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>SQL injection prevention: <code>pq.QuoteIdentifier</code> used consistently for dynamic identifiers, <code>sql.Named</code> for values, <code>escapeForLike</code> for LIKE patterns.</li>
+  <li>Partition name validation (<code>isValidPartitionName</code>) properly restricts format to prevent accidental drops.</li>
+  <li>Transaction handling with proper rollback in <code>defer</code> across all mutation functions.</li>
+  <li>Retention policy validation (90-day minimum, 75% partition threshold, 80% storage threshold) is sensible.</li>
+  <li><code>NextDay</code> removal is safe: the only caller was the inline partition creation in <code>loadDailyTestAnalysisByJob</code>, which is also removed.</li>
+  <li><code>strings</code> import removal is correct: no other usage in prow.go after the inline partition SQL is removed.</li>
+  <li>Dry-run support is comprehensive throughout all destructive operations.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>What is the expected deployment sequence? Does the partition migration (<code>MigrateToPartitionedTable</code> + <code>Finalize</code>) run before this code deploys, or does this PR need to handle the non-partitioned case?</li>
+  <li>Is the <code>idx_pjrt_run_test_status</code> index intentionally missing a priority:2 column, or should <code>TestID</code> (or another column) be included?</li>
+  <li>Should aging errors (detach/drop old partitions) really block the entire load, or can they be logged and continued past?</li>
+</ul>
+
+</div>
+</body>
+</html>
