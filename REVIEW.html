@@ -18,11 +18,12 @@
   pre code { background: none; padding: 0; }
   a { color: #0969da; text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; font-size: 0.9rem; }
   .meta dt { font-weight: 600; display: inline; }
   .meta dd { display: inline; margin-left: 0; margin-right: 1.5rem; }
-  .refresh-log { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 0.75rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.875rem; }
+  .refresh-log { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 0.75rem 1.25rem; margin-bottom: 1rem; font-size: 0.875rem; }
   .refresh-log strong { display: block; margin-bottom: 0.25rem; }
+  .refresh-log ul { margin-top: 0.25rem; }
   .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
   .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.5rem; text-transform: uppercase; vertical-align: middle; }
   .severity.should-fix { background: #fff8c5; color: #6a5300; }
@@ -42,20 +43,23 @@
 <div class="meta">
   <dl>
     <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3533">openshift/sippy#3533</a></dd>
-    <dt>Head SHA:</dt><dd><code>fe42ba08360d9a2bb2c959421c562010a5e1b943</code></dd>
+    <dt>Head SHA:</dt><dd><code>2408ed2f18d6bbd96232d50b6fe8e312a6de7601</code></dd>
     <dt>Base:</dt><dd>master</dd>
-    <dt>Reviewed:</dt><dd>2026-05-18T15:16:19Z</dd>
+    <dt>Reviewed:</dt><dd>2026-05-18T18:23:50Z</dd>
   </dl>
 </div>
 
 <div class="refresh-log">
-  <strong>Refreshed 2026-05-18 from 7eaee42 → fe42ba08</strong>
-  3 new commits. Only <code>pkg/flags/postgres_benchmarking_test.go</code> changed (+254/-25): added 7 new benchmark cases, <code>benchmarkResult</code> struct, <code>printSummaryTable</code>, <code>runBenchmarkCase</code> helper, iterations bumped to 3, two new test entry points.
+  <strong>Refresh history</strong>
+  <ul>
+    <li><strong>7eaee42 → fe42ba08</strong>: 3 commits (+254/-25) — <code>benchmarkResult</code> struct, <code>printSummaryTable</code>, <code>runBenchmarkCase</code>, 7 new benchmark cases, iterations bumped to 3.</li>
+    <li><strong>fe42ba08 → 2408ed2f</strong>: 1 commit (+24/-9) — DB client cleanup via <code>t.Cleanup</code>, <code>asOf</code> parameter to <code>getBenchmarkCases</code>, map lookup guarded; petr-muller approved with <code>/hold</code>.</li>
+  </ul>
 </div>
 
 <div class="verdict">
   <strong>Verdict: Approve</strong>
-  <p>The refactoring is clean and the benchmarks are properly gated. The new commits significantly improve the benchmark framework and expand coverage. Remaining suggestions are quality-of-life improvements, none blocking.</p>
+  <p>The refactoring is clean and the benchmarks are properly gated. The latest commit addresses three prior findings (DB leak, map panic, time drift). Remaining items are quality-of-life nits, none blocking. PR is approved with a hold pending author response on the <code>testing.B</code> question.</p>
 </div>
 
 <h2>What this PR does</h2>
@@ -63,7 +67,8 @@
   <li>Extracts the ProwJobRun database query from <code>PrintJobDetailsReportFromDB</code> into a new exported <code>JobDetailsReport</code> function, separating query logic from HTTP response handling.</li>
   <li>Adds a benchmark test file gated behind <code>db_benchmarking_dsn</code> env var — skips in CI.</li>
   <li>Benchmarks 10+ query patterns: <code>FindTestsByRelease</code>, <code>TestDurations</code>, <code>TestOutputs</code>, <code>JobDetails</code>, <code>TestAnalysisOverall</code>, <code>TestAnalysisByJob</code> (with and without variant filter), lookback count queries (14d/9d), and pass-rate analysis.</li>
-  <li>Since previous review: added <code>benchmarkResult</code> struct (min/max/avg/total), <code>runBenchmarkCase</code> and <code>printSummaryTable</code> helpers; iterations bumped to 3; new <code>Test_BenchmarkFindTestsByRelease</code> and <code>Test_BenchmarkCombined</code> entry points; <code>benchmarkJobName</code> constant extracted.</li>
+  <li>Result framework: <code>benchmarkResult</code> struct (min/max/avg/total), <code>runBenchmarkCase</code> helper, <code>printSummaryTable</code> sorted by avg descending.</li>
+  <li>Latest commit: <code>asOf</code> captured once per test run and passed into benchmark cases (consistent time window), DB client closed via <code>t.Cleanup</code>, map lookup guarded with comma-ok.</li>
 </ul>
 
 <h2>Findings</h2>
@@ -72,7 +77,17 @@
 
 <div class="finding resolved">
   <p><span class="severity resolved">resolved</span> <strong>Custom timing framework — sufficiently improved</strong></p>
-  <p>Original concern: duplicated timing with <code>fmt.Printf</code>, iterations hardcoded to 1. New code adds <code>benchmarkResult</code> with min/max/avg/total, <code>runBenchmarkCase</code> helper, <code>printSummaryTable</code>, and bumps iterations to 3. Still not <code>testing.B</code> / <code>benchstat</code>, but the custom framework is now genuinely useful.</p>
+  <p>Original concern: duplicated timing with <code>fmt.Printf</code>, iterations hardcoded to 1. Addressed with <code>benchmarkResult</code> struct (min/max/avg/total), <code>runBenchmarkCase</code> helper, <code>printSummaryTable</code>, iterations now 3. Not <code>testing.B</code>, but the custom framework is now genuinely useful.</p>
+</div>
+
+<div class="finding resolved">
+  <p><span class="severity resolved">resolved</span> <strong>DB client never closed — leaked connections</strong></p>
+  <p>Fixed in <code>2408ed2f</code>. <code>getBenchmarkDBClient</code> now registers <code>t.Cleanup</code> to close the underlying <code>sql.DB</code> handle.</p>
+</div>
+
+<div class="finding resolved">
+  <p><span class="severity resolved">resolved</span> <strong>Direct map index into <code>getIndividualBenchmarkCases()</code> can panic</strong></p>
+  <p>Fixed in <code>2408ed2f</code>. <code>Test_BenchmarkFindTestsByRelease</code> now uses comma-ok check and <code>t.Fatal</code> on miss.</p>
 </div>
 
 <h3>Should fix</h3>
@@ -87,25 +102,6 @@ const benchmarkJobName = "periodic-ci-openshift-release-main-ci-4.22-e2e-aws-ovn
 </div>
 
 <h3>Nits</h3>
-
-<div class="finding nit">
-  <p><span class="severity nit">nit</span> <strong>DB client never closed — leaked connections</strong></p>
-  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>getBenchmarkDBClient</code></p>
-  <pre><code>dbc, err := dbFlags.GetDBClient()
-if err != nil {
-    t.Fatalf("couldn't get DB client: %v", err)
-}
-return dbc</code></pre>
-  <p>The helper opens a DB connection but registers no <code>t.Cleanup</code> to close it. Unlikely to matter in practice for a manual benchmark tool, but a <code>t.Cleanup(func() { dbc.DB.Close() })</code> is good hygiene. (CodeRabbit also flagged this.)</p>
-</div>
-
-<div class="finding nit">
-  <p><span class="severity nit">nit</span> <strong>Direct map index into <code>getIndividualBenchmarkCases()</code> can panic</strong></p>
-  <p><code>pkg/flags/postgres_benchmarking_test.go</code> — <code>Test_BenchmarkFindTestsByRelease</code></p>
-  <pre><code>bc := getIndividualBenchmarkCases()["FindTestsByRelease"]
-r := runBenchmarkCase(t, dbc, bc, iterations)</code></pre>
-  <p>If the key drifts (rename, typo), <code>bc</code> is a zero-value <code>benchmarkCase</code> and <code>bc.fn</code> is nil — calling it panics with no useful message. Use a comma-ok check and <code>t.Fatal</code> on miss.</p>
-</div>
 
 <div class="finding nit">
   <p><span class="severity nit">nit</span> <strong>Multiple benchmark cases use raw SQL not present in production</strong></p>
@@ -148,11 +144,12 @@ r := runBenchmarkCase(t, dbc, bc, iterations)</code></pre>
   <li>No changes to any API contract or response format.</li>
   <li><code>runBenchmarkCase</code> properly resets min on first iteration (<code>i == 0</code> check).</li>
   <li><code>printSummaryTable</code> sorts by avg descending — useful for identifying slowest queries at a glance.</li>
+  <li><code>asOf</code> captured once per test function and passed into <code>getBenchmarkCases</code> — time windows are now consistent across all iterations within a run.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
-  <li>Is the intent to run these manually against a prod-like DB before and after optimization? If so, <code>benchstat</code> on <code>testing.B</code> output would give statistically meaningful comparisons.</li>
+  <li>Is the intent to run these manually against a prod-like DB before and after optimization? If so, <code>benchstat</code> on <code>testing.B</code> output would give statistically meaningful comparisons. (Also raised in PR comments 2026-05-18.)</li>
   <li>Should the raw SQL benchmark cases be extracted into production query functions for consistency with the other cases?</li>
 </ul>
 
