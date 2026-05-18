@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3535</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 52em; margin: 2em auto; padding: 0 1em; color: #24292f; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid #d0d7de; padding-bottom: .3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: .2em; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: .15em .3em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.45; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: .8em 1em; margin: 1em 0; border-radius: 4px; }
+  .meta { background: #f6f8fa; padding: .8em 1em; border-radius: 6px; margin-bottom: 1.5em; font-size: 0.9em; }
+  .meta a { color: #0969da; }
+  ul { padding-left: 1.5em; }
+  li { margin-bottom: .3em; }
+  .severity { font-weight: bold; text-transform: uppercase; font-size: 0.8em; letter-spacing: .04em; }
+  .sev-nit { color: #6e7781; }
+  .sev-question { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3535 &mdash; MPIIT: Update Owned Views</h1>
+
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3535">openshift/sippy#3535</a><br>
+  <strong>Head SHA:</strong> <code>05b2ed468471013c05a7258879d52f02a2b2e614</code><br>
+  <strong>Base:</strong> master<br>
+  <strong>Reviewed:</strong> 2026-05-18T14:49:25Z
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+  <p>Clean, config-only change to view definitions. Renames are consistent across all four release versions, new shell views are structurally correct, and regression tracking is enabled uniformly on all MPIIT-owned views. No code logic is touched.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Renames <code>*-LP-Interop</code> views to <code>*-LP-OCP-Compat</code> across releases 5.0, 4.22, 4.21, and 4.20 &mdash; filters and product lists unchanged, only the view name changes.</li>
+  <li>Adds two new 5.0-only shell views (<code>5.0-LP-Interop</code>, <code>5.0-LP-Chaos</code>) with empty <code>LayeredProduct: []</code> lists, intended for incremental component onboarding.</li>
+  <li>Enables <code>regression_tracking</code> on all MPIIT-owned LP views (both the renamed <code>LP-OCP-Compat</code> views and the two new shell views).</li>
+  <li>Three well-separated commits: rename first, then add new views, then enable tracking.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-nit">Nit</span> &mdash; Name reuse may confuse git history</h3>
+<p><code>config/views.yaml:617</code></p>
+<p>The new <code>5.0-LP-Interop</code> (empty product list, onboarding shell) reuses the exact name that the old view had before it was renamed to <code>5.0-LP-OCP-Compat</code>. Anyone doing <code>git log -S "5.0-LP-Interop"</code> will find this view's history interleaved with the old one, making it harder to trace intent. Not blocking since the PR description documents this clearly, but a distinct name (e.g. <code>5.0-LP-Interop-Onboarding</code>) would make the history cleaner.</p>
+
+<h3><span class="severity sev-question">Question</span> &mdash; Identical new views</h3>
+<p><code>config/views.yaml:617-708</code></p>
+<p><code>5.0-LP-Interop</code> and <code>5.0-LP-Chaos</code> are byte-for-byte identical (same base/sample releases, same variant options, same advanced options, same empty product list). Is the expectation that they'll diverge soon with different <code>LayeredProduct</code> entries? If they're meant to track the same set of products, one view would suffice.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>All four release versions (5.0, 4.22, 4.21, 4.20) renamed consistently from <code>LP-Interop</code> to <code>LP-OCP-Compat</code>.</li>
+  <li>No stale <code>LP-Interop</code> references in Go code, JS/TS, JSON, or documentation files.</li>
+  <li>The renamed <code>5.0-LP-OCP-Compat</code> retains its original <code>LayeredProduct</code> list intact &mdash; rename is name-only.</li>
+  <li>New shell views structurally match the existing pattern (same <code>column_group_by</code>, <code>db_group_by</code>, <code>advanced_options</code> fields).</li>
+  <li><code>regression_tracking: enabled: true</code> set uniformly on all six affected views.</li>
+  <li>New views are 5.0-only &mdash; no 4.x counterparts, consistent with the "5.0 only" scope described in the PR.</li>
+  <li>Adjacent views (<code>5.0-lp-Interop-coo</code>, etc.) are not touched and remain unaffected.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the name reuse of <code>5.0-LP-Interop</code> intentional, or would a distinct name (e.g. <code>5.0-LP-Interop-Onboarding</code>) be preferable to avoid confusion in git history?</li>
+  <li>Will <code>5.0-LP-Interop</code> and <code>5.0-LP-Chaos</code> receive different <code>LayeredProduct</code> entries soon, or might they stay identical for an extended period?</li>
+</ul>
+
+</body>
+</html>
