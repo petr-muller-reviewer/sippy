@@ -1,10 +1,14 @@
 ---
 pr: openshift/sippy#3539
 title: "TRT-2463: labels for payload job runs"
-head_sha: 88295fe5e52394b54019322873bde7a61b8db593
+head_sha: 4fdac0f30bb97f73af8db928f22952837748fb0a
 base: master
-reviewed_at: 2026-05-18T23:32:46Z
+reviewed_at: 2026-05-19T17:05:15Z
 verdict: needs-discussion
+refresh_log:
+  - previous_sha: 88295fe5e52394b54019322873bde7a61b8db593
+    new_sha: 4fdac0f30bb97f73af8db928f22952837748fb0a
+    summary: "Author pushed coderabbit fixups: context threading, error logging for idFromURL, methods on ReleaseLoader"
 ---
 
 ## Findings
@@ -30,15 +34,15 @@ verdict: needs-discussion
         return path.Base(parsed.Path)
     }
 
-### [nit] context.Background() without timeout for BigQuery calls
+### [resolved] context.Background() without timeout for BigQuery calls
 - where: `pkg/dataloader/releaseloader/releasesync.go:370`
 - concern: The `ctx` used for all BigQuery label lookups is unbounded. A hung query blocks the entire release sync. Add `context.WithTimeout`.
-- excerpt: |
-    ctx := context.Background()
+- resolved: 4fdac0f30 — `context.Context` is now accepted via `New()` and threaded through `ReleaseLoader` to the BQ calls. The caller's context (from `cmd/sippy/load.go`) is used instead of an unbounded `context.Background()`.
 
-### [nit] Silently ignored errors from idFromURL in label-fetching pass
+### [resolved] Silently ignored errors from idFromURL in label-fetching pass
 - where: `pkg/dataloader/releaseloader/releasesync.go:437,456`
 - concern: Uses `id, _ := idFromURL(...)` discarding errors, inconsistent with the explicit error handling in `recordResultsFrom` (line 375). At minimum log at debug level.
+- resolved: 4fdac0f30 — Errors are now checked and logged with structured fields (`releaseTag`, `url`, `error`) at Warning level. Early-continue on error.
 
 ### [nit] No tests for extractBuildIDFromURL
 - where: `pkg/dataloader/releaseloader/releasesync.go:508-522`
@@ -55,8 +59,8 @@ verdict: needs-discussion
 ## Checked
 - `pq.StringArray` with GIN index matches existing model patterns (`ProwJobRun.Labels`, `Bug.Labels`)
 - `GatherLabelsFromBQ` gracefully handles nil `bqClient`
-- `ReleaseLoader.New` signature change properly propagated to `cmd/sippy/load.go`
-- Test updated to pass `nil` as bqClient
+- `ReleaseLoader.New` signature change properly propagated to `cmd/sippy/load.go` (now includes `ctx` parameter)
+- Test updated to use `&ReleaseLoader{}` zero value for method call
 - Frontend label dialog renders markdown explanations via ReactMarkdown
 - `/api/jobs/labels` endpoint already exists and is functional
 - No database migration needed — GORM auto-migration handles the new field
