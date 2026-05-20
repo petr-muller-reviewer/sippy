@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3541</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; background: #fff; padding: 2rem; }
+  .container { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.25rem; margin-bottom: 0.4rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; margin: 0.5rem 0 1rem; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-left: 0; margin-right: 1.5rem; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1.5rem; }
+  .verdict.changes { background: #fff8c5; border-left-color: #d4a72c; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.5rem; vertical-align: middle; }
+  .severity.blocking { background: #ffebe9; color: #cf222e; }
+  .severity.should-fix { background: #fff8c5; color: #9a6700; }
+  .severity.nit { background: #ddf4ff; color: #0969da; }
+  .severity.question { background: #f6f8fa; color: #57606a; }
+  .finding { margin-bottom: 1.5rem; padding-left: 0.75rem; border-left: 2px solid #d0d7de; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: openshift/sippy#3541</h1>
+<p style="font-size:1.1rem; color:#57606a; margin-bottom:1rem;">Trt 1989 migration indexes</p>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3541">openshift/sippy#3541</a></dd>
+    <dt>Head SHA:</dt><dd><code>b252569d945494e4299d4cd8553669532da9b7c8</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-05-20T10:15:07Z</dd>
+    <dt>Author:</dt><dd>neisw</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Verdict: Approve</strong>
+  <p>Well-structured Phase 1+2 of the TRT-1989 partitioning prep. All data loader paths correctly populate denormalized fields, the explicit join table migration is handled properly, and the planning documentation is thorough. Two should-fix items around index naming and backfill SQL accuracy, plus a couple of questions about CASCADE behavior and NOT NULL constraints. No blocking issues.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds denormalized <code>release</code> and <code>timestamp</code> columns to <code>prow_job_runs</code>, <code>prow_job_run_tests</code>, <code>prow_job_run_test_outputs</code>, <code>prow_job_run_annotations</code>, and a new explicit <code>prow_job_run_prow_pull_requests</code> join table &mdash; prep for future table partitioning.</li>
+  <li>Converts the implicit GORM-managed many-to-many join table for pull requests into an explicit model (<code>ProwJobRunProwPullRequest</code>) with <code>SetupJoinTable</code>, so the denormalized fields can be populated on insert.</li>
+  <li>Updates the prow loader to populate all new fields at every creation site, wrapped in a transaction for ProwJobRun + pull request inserts.</li>
+  <li>Adds composite indexes on <code>(release, timestamp)</code> (or <code>(timestamp, release)</code> for two tables) to provide immediate query benefits and validate the data before partitioning.</li>
+  <li>Includes detailed planning documents covering the phased migration strategy, backfill SQL, query audit, and operational notes for production deployment.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="severity should-fix">Should Fix</span> Composite index names misleading for timestamp-first tables</h3>
+  <p><code>pkg/db/models/prow.go:108-110</code></p>
+  <pre><code>ProwJobRunTimestamp time.Time `gorm:"index:idx_prow_job_run_tests_release_timestamp"`
+ProwJobRunRelease string `gorm:"index:idx_prow_job_run_tests_release_timestamp"`</code></pre>
+  <p>GORM uses field declaration order for composite indexes. On <code>prow_job_run_tests</code> and <code>prow_job_run_test_outputs</code>, timestamp is declared first, so the actual index column order is <code>(timestamp, release)</code>. The plan doc confirms this is intentional (materialized view queries filter primarily on timestamp ranges). But the index name says <code>release_timestamp</code>, implying release-first. Renaming to <code>..._timestamp_release</code> would prevent confusion when someone inspects the schema.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity should-fix">Should Fix</span> Backfill SQL does not account for zero-value timestamps</h3>
+  <p><code>docs/plans/trt-1989-partitioning-prep.md:150-164</code></p>
+  <pre><code>AND (r.prow_job_release IS NULL OR r.prow_job_release = '');</code></pre>
+  <p>The backfill conditions handle the string release column correctly (<code>IS NULL OR = ''</code>). But Go's zero <code>time.Time</code> maps to <code>0001-01-01 00:00:00+00</code> in PostgreSQL, not NULL. The backfill SQL for timestamp columns needs a condition like <code>prow_job_run_timestamp &lt; '2000-01-01'</code> or <code>= '0001-01-01 00:00:00+00'</code>. This applies to all five tables with denormalized timestamp columns.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity nit">Nit</span> varchar(10) removal from ProwJob.Release is undocumented</h3>
+  <p><code>pkg/db/models/prow.go:20</code></p>
+  <pre><code>Release     string         `gorm:"index"`</code></pre>
+  <p>Changed from <code>gorm:"varchar(10);index"</code> to <code>gorm:"index"</code>. GORM's AutoMigrate won't alter the existing column type, so this is a no-op in practice. The new denormalized release fields also use unbounded <code>string</code>, so it's consistent. Just noting the silent schema intent change.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity question">Question</span> CASCADE behavior with explicit join table lacking gorm.Model</h3>
+  <p><code>pkg/db/models/prow.go:74-79</code></p>
+  <pre><code>type ProwJobRunProwPullRequest struct {
+    ProwJobRunID        uint      `gorm:"primaryKey"`
+    ProwPullRequestID   uint      `gorm:"primaryKey"`
+    ProwJobRunRelease   string    `gorm:"index:idx_prow_job_run_prow_pull_requests_release_timestamp"`
+    ProwJobRunTimestamp time.Time `gorm:"index:idx_prow_job_run_prow_pull_requests_release_timestamp"`
+}</code></pre>
+  <p><code>ProwJobRun.PullRequests</code> has <code>constraint:OnDelete:CASCADE</code>. CASCADE should work at the DB FK level regardless of whether GORM's <code>DeletedAt</code> is present. But GORM's soft-delete interplay with explicit join tables without <code>DeletedAt</code> can sometimes produce surprises. Has this been tested with an integration test (delete a ProwJobRun and verify the join table rows are removed)?</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity question">Question</span> NOT NULL constraints deferred</h3>
+  <p><code>pkg/db/models/prow.go:43,108,110,132,134</code></p>
+  <p>All denormalized columns are nullable (Go zero values, no <code>gorm:"not null"</code> tag). Phase 3 queries that filter on these columns will need to account for empty/zero values until backfill completes. Is there a plan to add NOT NULL constraints (via a migration or GORM tags) after backfill, before partitioning? Or will the partitioning migration itself enforce this?</p>
+</div>
+
+<h2>Things I checked and found correct</h2>
+<ul class="checked">
+  <li>BigQuery loader feeds through <code>processGCSBucketJobRun</code> &mdash; same path as GCS, parity maintained</li>
+  <li>All creation sites for ProwJobRun (1 site), ProwJobRunTest (set at lines 1246-1249), ProwJobRunTestOutput (1 site), ProwJobRunAnnotation (1 site), ProwJobRunProwPullRequest (1 site) correctly populate denormalized fields</li>
+  <li><code>SetupJoinTable</code> is registered before <code>AutoMigrate</code> in <code>db.go:77</code></li>
+  <li><code>ProwJobRunProwPullRequest</code> is listed after both parent tables in <code>modelsToMigrate</code></li>
+  <li>Transaction wrapping ProwJobRun + pull request join table inserts ensures atomicity</li>
+  <li>Seed data (<code>seed_data.go</code>) and test fixtures (<code>job_runs_test.go</code>, <code>pr_new_tests_worker_test.go</code>) updated with new fields</li>
+  <li>Index column order matches stated intent in plan doc for each table</li>
+  <li><code>ProwJobRunTestOutput</code> gets release/timestamp set inline at creation in <code>extractTestCases</code></li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The composite index on <code>prow_job_run_tests</code> and <code>prow_job_run_test_outputs</code> intentionally leads with timestamp per the plan doc. Should the index names reflect this (<code>..._timestamp_release</code> instead of <code>..._release_timestamp</code>) to avoid confusion when inspecting the schema?</li>
+  <li>Has the CASCADE delete on the explicit <code>ProwJobRunProwPullRequest</code> join table been verified with an integration test (delete a <code>ProwJobRun</code>, confirm join table rows are removed)?</li>
+  <li>What's the plan for adding NOT NULL constraints on the denormalized columns after backfill completes?</li>
+</ul>
+
+</div>
+</body>
+</html>
