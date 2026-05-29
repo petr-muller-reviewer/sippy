@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3560</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #24292e;
+    max-width: 860px;
+    margin: 40px auto;
+    padding: 0 24px;
+  }
+  h1 { font-size: 1.5em; margin-bottom: 4px; }
+  h2 { font-size: 1.15em; border-bottom: 1px solid #e1e4e8; padding-bottom: 4px; margin-top: 32px; }
+  h3 { font-size: 1em; margin-bottom: 4px; }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.875em;
+    background: #f6f8fa;
+    border-radius: 4px;
+  }
+  code { padding: 2px 5px; }
+  pre {
+    padding: 12px 16px;
+    overflow-x: auto;
+    border: 1px solid #e1e4e8;
+    border-left: 4px solid #d0d7de;
+    margin: 8px 0;
+  }
+  .meta {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    font-size: 0.9em;
+  }
+  .meta a { color: #0366d6; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .meta table { border-collapse: collapse; }
+  .meta td { padding: 2px 16px 2px 0; vertical-align: top; }
+  .meta td:first-child { color: #57606a; font-weight: 500; white-space: nowrap; }
+  .verdict-box {
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 8px;
+    border-left: 5px solid #2da44e;
+    background: #f0fff4;
+  }
+  .verdict-box .verdict-label {
+    font-weight: 700;
+    font-size: 1.05em;
+    color: #1a7f37;
+    margin-bottom: 6px;
+  }
+  .finding {
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .finding-title { font-weight: 600; margin-bottom: 6px; }
+  .severity {
+    display: inline-block;
+    font-size: 0.78em;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 12px;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .sev-blocking { background: #ffd3d3; color: #8e1f1f; }
+  .sev-should-fix { background: #fff3cd; color: #664d03; }
+  .sev-nit { background: #e8f0fe; color: #1a56db; }
+  .sev-question { background: #f3e8ff; color: #6f3fa0; }
+  .where { font-size: 0.88em; color: #57606a; margin-bottom: 6px; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .checked-list li { color: #24292e; }
+  .section-fine { color: #57606a; font-size: 0.93em; }
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <table>
+    <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3560">openshift/sippy#3560</a></td></tr>
+    <tr><td>Title</td><td>NO-JIRA: Move synthetic release flag from BigQuery to config</td></tr>
+    <tr><td>Author</td><td>smg247 (Stephen Goeddel)</td></tr>
+    <tr><td>Head SHA</td><td><code>a05ac8eca5d92f003ac13e392ea91999e4212e8b</code></td></tr>
+    <tr><td>Base</td><td><code>main</code></td></tr>
+    <tr><td>Reviewed at</td><td>2026-05-28T23:51:37Z</td></tr>
+    <tr><td>Status</td><td>OPEN — approved, do-not-merge/hold</td></tr>
+  </table>
+</div>
+
+<h1>Code Review</h1>
+
+<div class="verdict-box">
+  <div class="verdict-label">Verdict: Approve</div>
+  <p style="margin:0">
+    Clean, well-scoped simplification. Moving <code>Synthetic</code> into the YAML config is the right call — the config is already the authoritative source for everything else about these releases, and the BigQuery dependency was purely incidental. The change is mechanically correct, all call sites are updated, no API consumers break, and test coverage is thorough. One renamed test case has a misleading name (nit only); nothing blocking.
+  </p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code>Synthetic bool</code> to <code>v1.ReleaseConfig</code> and marks all 12 synthetic releases with <code>synthetic: true</code> in <code>openshift-customizations.yaml</code> (and the regenerated <code>openshift.yaml</code>).</li>
+  <li>Simplifies <code>BuildSyntheticReleaseJobOverrides</code> by removing the <code>releaseConfigs []sippyv1.Release</code> parameter — the function now reads <code>releaseCfg.Synthetic</code> directly from the config map.</li>
+  <li>Removes <code>Synthetic</code> from <code>sippyv1.Release</code> and <code>sippyv1.ReleaseRow</code> (the cached and BigQuery types), eliminating the BQ column dependency.</li>
+  <li>Strips GCP/BigQuery flags from <code>VariantSnapshotFlags</code> and the <code>make update-variants</code> Makefile target, so developers can run it without credentials.</li>
+  <li>Regenerates <code>openshift.yaml</code> locally — a preview that includes changes from the companion ci-tools PR #5210, which will be overwritten by the next generator run.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <div class="finding-title">
+    <span class="severity sev-nit">nit</span>
+    Renamed test case name doesn't match what the test exercises
+  </div>
+  <div class="where"><code>pkg/variantregistry/synthetic_test.go:~156</code></div>
+  <p>
+    The case was renamed from <em>"release in releaseConfigs but not in config is ignored"</em> to <em>"release marked synthetic but not in config is fine"</em>, but the test body has a <code>"4.22"</code> entry without <code>Synthetic: true</code> — that's not a release marked synthetic at all. The new name describes a scenario the test doesn't actually exercise. The original name was a better description of the before/after contrast (BQ says synthetic, config doesn't list it → ignored).
+  </p>
+  <pre>name: "release marked synthetic but not in config is fine",
+releases: map[string]v1.ReleaseConfig{
+    "4.22": {
+        Jobs: map[string]bool{"job-a": true},
+        // no Synthetic: true here
+    },
+},
+expectedOverrides: map[string]string{},</pre>
+</div>
+
+<h2>Things I checked and was satisfied with</h2>
+<ul class="checked-list section-fine">
+  <li><strong>API field removal is safe.</strong> <code>sippyv1.Release.Synthetic</code> was the only non-test consumer of the field, mapped via <code>transformRelease()</code> in <code>pkg/api/releases.go:481</code>. The frontend (<code>sippy-ng/src/</code>) has zero references to <code>Synthetic</code>. No downstream breakage.</li>
+  <li><strong>All call sites updated.</strong> <code>cmd/sippy/load.go</code>, <code>cmd/sippy/variants_generate.go</code>, <code>cmd/sippy/variants_snapshot.go</code>, and both test files all consistently drop the <code>releaseConfigs</code> argument.</li>
+  <li><strong>All 12 synthetic releases present.</strong> aro-integration, aro-stage, aro-production, aro-classic-integration, aro-classic-stage, aro-classic-production, rosa-stage, rosa-integration, rosa-production, rrp-integration, automation, ocp-hypershift — all marked in <code>openshift-customizations.yaml</code> and reflected in <code>openshift.yaml</code>.</li>
+  <li><strong>aro-classic-* snapshot fixes are correct.</strong> The periodic <code>aro-classic-{integration,stage,production}</code> jobs in <code>snapshot.yaml</code> gain a <code>Release:</code> field (previously absent, meaning they weren't attributed to any synthetic release) and their <code>JobTier</code> changes from <code>candidate</code> to <code>standard</code>. Both are correct outcomes of synthetic release attribution now working.</li>
+  <li><strong>TestVariantsSnapshot dependency is sound.</strong> The test reads the committed <code>openshift.yaml</code> from disk. Since that file has been regenerated with <code>synthetic: true</code> entries for all synthetic releases, the test validates the correct merged state.</li>
+  <li><strong>No dead code.</strong> The deleted <code>syntheticReleaseNames()</code> helper had no callers outside the now-changed function. Clean removal.</li>
+  <li><strong>openshift.yaml regeneration is documented.</strong> The PR description explicitly states it's a preview of ci-tools PR #5210 changes and will be overwritten on the next generator run. This is standard operating procedure for this repo.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>
+    <code>TestVariantsSnapshot</code> now depends on <code>synthetic: true</code> being present in the committed <code>openshift.yaml</code>. If someone regenerates that file before the ci-tools companion PR ships (and the generator doesn't yet emit <code>synthetic:</code> into the YAML), the test would still pass but with different semantics — synthetic releases wouldn't be attributed correctly at runtime. Is there a CI check or generator enforcement that would catch this gap? (Not a blocker given the companion PR is linked and the generator will emit the correct content once both merge.)
+  </li>
+</ul>
+
+</body>
+</html>
