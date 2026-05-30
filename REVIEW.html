@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3563</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.5rem 0 0.3rem; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.8rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .finding { border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin: 0.8rem 0; }
+  .finding-should-fix { border-left: 4px solid #bf8700; }
+  .finding-nit { border-left: 4px solid #0969da; }
+  .finding-question { border-left: 4px solid #8250df; }
+  .severity { font-size: 0.8em; font-weight: 600; text-transform: uppercase; padding: 0.1em 0.4em; border-radius: 3px; }
+  .sev-should-fix { background: #fff8c5; color: #6a5400; }
+  .sev-nit { background: #ddf4ff; color: #0550ae; }
+  .sev-question { background: #fbefff; color: #6639ba; }
+  ul { padding-left: 1.5rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3563</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3563">openshift/sippy#3563</a></dd>
+    <dt>Title:</dt><dd>Use the newly clustered release junit column for ~70% cost savings</dd>
+    <dt>Head SHA:</dt><dd><code>586e93441d2fc4dc93251638698ddbd008fd457b</code></dd>
+    <dt>Base:</dt><dd><code>main</code></dd>
+    <dt>Reviewed:</dt><dd>2026-05-30T13:11:41Z</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve with suggestion.</strong>
+  <p>The optimization is correct and safe. It adds an early <code>AND release = @ReleaseFilter</code> predicate to the <code>deduped_testcases_with_rownum</code> CTE, letting BigQuery prune data at scan time via the clustering column. The existing <code>jv_Release.variant_value</code> filter remains as a second check, so the change is strictly additive and cannot produce wrong results. The one substantive ask is a test for the non-empty release filter path.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>releaseFilterClause()</code> helper that returns <code>AND release = @ReleaseFilter</code> when a release string is provided, empty string otherwise.</li>
+  <li>Threads a new <code>releaseFilter</code> parameter through <code>BuildComponentReportQuery</code>, <code>buildTestDetailsQuery</code>, and <code>buildCRQueryCTEs</code>.</li>
+  <li>Injects the filter into the <code>deduped_testcases_with_rownum</code> CTE's WHERE clause and conditionally appends the <code>@ReleaseFilter</code> query parameter.</li>
+  <li>For base queries, always passes <code>BaseRelease.Name</code>. For sample queries, passes <code>SampleRelease.Name</code> unless PR or payload options are set (where the release column may not match).</li>
+  <li>Updates existing test call sites to pass the new <code>""</code> parameter.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding finding-should-fix">
+  <p><span class="severity sev-should-fix">should-fix</span> <strong>No test coverage for non-empty <code>releaseFilter</code></strong></p>
+  <p><code>querygenerators_test.go:90-98, 196-204, 272-294</code></p>
+  <p>All four test call sites pass <code>""</code> as the release filter. The new code path &mdash; where <code>releaseFilterClause</code> returns the SQL clause and the <code>ReleaseFilter</code> parameter is appended &mdash; is never exercised. A single additional test case (or a new sub-test in <code>TestBuildComponentReportQuery_ExclusiveTestFiltering</code>) that passes e.g. <code>"4.18"</code> and asserts the query contains <code>AND release = @ReleaseFilter</code> and the params include <code>{Name: "ReleaseFilter", Value: "4.18"}</code> would close this gap.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding finding-nit">
+  <p><span class="severity sev-nit">nit</span> <strong>Duplicated PR/payload guard for sample release filter</strong></p>
+  <p><code>querygenerators.go:143-146</code> and <code>querygenerators.go:949-952</code></p>
+  <p>The same three-line block computing <code>sampleReleaseFilter</code> appears in both <code>sampleQueryGenerator.QueryTestStatus</code> and <code>sampleTestDetailsQueryGenerator.QueryTestStatus</code>. This follows the existing pattern in the file (the PR/payload parameter appending is also duplicated), so it's consistent, but a helper like <code>func sampleReleaseFilter(r reqopts.ReleaseOptions) string</code> would prevent future drift. Not blocking.</p>
+<pre>sampleReleaseFilter := s.ReqOptions.SampleRelease.Name
+if s.ReqOptions.SampleRelease.PullRequestOptions != nil || s.ReqOptions.SampleRelease.PayloadOptions != nil {
+    sampleReleaseFilter = ""
+}</pre>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding finding-question">
+  <p><span class="severity sev-question">question</span> <strong>Semantics of <code>junit.release</code> vs <code>jv_Release.variant_value</code></strong></p>
+  <p><code>querygenerators.go:311-312</code></p>
+  <p>The new filter uses the <code>release</code> column directly on the <code>junit</code> table, while the existing filter uses <code>jv_Release.variant_value</code> from a LEFT JOIN to <code>job_variants</code>. Are these guaranteed to be identical for all standard (non-PR, non-payload) jobs? If there's ever a mismatch, the query would silently return no results for that job's tests. Presumably the clustering work ensures this, but it would be good to confirm.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL injection: <code>@ReleaseFilter</code> is a parameterized query parameter, not string-interpolated.</li>
+  <li>The PR/payload exclusion logic correctly mirrors how the existing code skips <code>@SampleRelease</code> filtering for those modes.</li>
+  <li>The base query always has a known release name, so passing it unconditionally is correct.</li>
+  <li>The filter is placed inside the CTE (before deduplication), which is optimal &mdash; BigQuery can prune partitions before the expensive JOIN and ROW_NUMBER.</li>
+  <li>The redundant filter (new early filter + existing variant-based filter) fails safe: disagreement yields empty results, not wrong results.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Can you confirm that <code>junit.release</code> and <code>jv_Release.variant_value</code> are always identical for standard CI jobs? If they could diverge (e.g., during a data backfill or schema migration), the double-filter would silently drop data.</li>
+  <li>Was the ~70% cost savings measured on a specific query (e.g., the main component readiness report), or is it an estimate across all component readiness queries?</li>
+</ul>
+
+</body>
+</html>
