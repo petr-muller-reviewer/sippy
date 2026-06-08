@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3571</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; background: #fff; padding: 2rem; }
+  .container { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.25rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.45; margin: 0.5rem 0 1rem; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-right: 1.5rem; }
+  .verdict { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .verdict strong { color: #9a6700; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.5rem; vertical-align: middle; }
+  .blocking { background: #ffebe9; color: #82071e; border: 1px solid #ff818266; }
+  .should-fix { background: #fff8c5; color: #6f4e00; border: 1px solid #d4a72c66; }
+  .nit { background: #ddf4ff; color: #0550ae; border: 1px solid #54aeff66; }
+  .question { background: #f6f8fa; color: #57606a; border: 1px solid #d0d7de; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .finding { margin-bottom: 1.5rem; padding-left: 0.75rem; border-left: 3px solid #d0d7de; }
+  .finding-blocking { border-left-color: #cf222e; }
+  .finding-should-fix { border-left-color: #d4a72c; }
+  .finding-nit { border-left-color: #54aeff; }
+  .finding-question { border-left-color: #8c959f; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: openshift/sippy#3571</h1>
+<p style="color:#57606a;margin-bottom:1rem;">Trt 1989 migration schemas job run tests only nested</p>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3571">openshift/sippy#3571</a></dd>
+    <dt>Head SHA:</dt><dd><code>6ecf3771f4</code></dd>
+    <dt>Base:</dt><dd><code>main</code></dd>
+    <dt>Reviewed:</dt><dd>2026-06-08T16:39:57Z</dd>
+    <dt>Author:</dt><dd>neisw</dd>
+    <dt>Size:</dt><dd>60 files, +6453/&minus;279</dd>
+    <dt>Refresh:</dt><dd>b80e1abd1f &rarr; 6ecf3771f4 (2 commits, +764/&minus;708 in 11 files)</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Verdict: Needs Discussion</strong>
+  <p>The architecture is sound &mdash; nested LIST&rarr;RANGE partitioning with lifecycle management is the right call for this data scale. Two blocking issues remain: the down migration would destroy production data, and the <code>test_analysis_by_job_by_dates</code> partitioning strategy change is invisible to existing databases via golang-migrate. The migration ordering uncertainty (previously blocking) was resolved in 6ecf3771f.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces PostgreSQL nested LIST&rarr;RANGE partitioning for <code>prow_job_run_tests</code>, <code>prow_job_run_test_outputs</code>, and <code>test_analysis_by_job_by_dates</code> via explicit SQL migration DDL, replacing GORM AutoMigrate management.</li>
+  <li>Adds partition lifecycle management (create/detach/drop) using the author's <code>gopar</code> library, integrated into both the data loader and the <code>load</code> command.</li>
+  <li>Updates ~20 queries across views, functions, and API handlers to filter on denormalized <code>release</code>/<code>timestamp</code> columns, enabling partition pruning and dropping unnecessary joins.</li>
+  <li>Sets <code>plan_cache_mode = force_custom_plan</code> and <code>work_mem = 128MB</code> globally to prevent 17-minute generic plan generation on tables with 10k+ partitions.</li>
+  <li>Adds comprehensive plan documentation (phases 2&ndash;4) and an e2e partition lifecycle test.</li>
+</ul>
+<p><strong>Since previous review (b80e1abd &rarr; 6ecf3771, 2 commits):</strong></p>
+<ul>
+  <li>Resolved migration ordering uncertainty &mdash; comments replaced with clear forward-looking notes.</li>
+  <li>Added release filters to several queries (<code>JobRunTestCount</code>, <code>QueryTestAnalysis</code>, <code>IsNewTest</code>, <code>JobsRunsReportFromDB</code> ran_test subquery) for proper partition pruning.</li>
+  <li>Added <code>work_mem = "128MB"</code> global runtime parameter and increased load timeout from 4h to 14h.</li>
+  <li>Rewrote phase 4 plan doc to scope 4a (3 tables) vs 4b (remaining 3 tables).</li>
+  <li>Added ~491 lines of benchmark tests covering matviews, API endpoints, and single-release matview creation.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+
+<div class="finding finding-blocking">
+  <p><span class="severity blocking">Blocking</span> <strong>Down migration drops production tables unconditionally</strong></p>
+  <p><code>pkg/db/migrations/000001_create_partitioned_tables.down.sql:6-8</code></p>
+  <pre>DROP TABLE IF EXISTS prow_job_run_tests CASCADE;
+DROP TABLE IF EXISTS prow_job_run_test_outputs CASCADE;
+DROP TABLE IF EXISTS test_analysis_by_job_by_dates CASCADE;</pre>
+  <p>These are the production table names, not <code>_new</code> suffixed staging tables. A migration rollback permanently destroys all test result data. The down migration should either be a no-op with a comment explaining why rollback is unsupported, or it should only drop staging tables.</p>
+</div>
+
+<div class="finding finding-blocking">
+  <p><span class="severity blocking">Blocking</span> <strong><code>test_analysis_by_job_by_dates</code> partitioning changed from RANGE to LIST in same migration version</strong></p>
+  <p><code>pkg/db/migrations/000001_create_partitioned_tables.up.sql:87-98</code></p>
+  <pre>CREATE TABLE IF NOT EXISTS test_analysis_by_job_by_dates (
+    ...
+) PARTITION BY LIST (release);</pre>
+  <p>The old migration 000001 created this table as <code>PARTITION BY RANGE (date)</code>. The replacement uses <code>PARTITION BY LIST (release)</code>. On existing databases, golang-migrate sees version 1 as already applied and skips it &mdash; the table keeps its old RANGE schema but the code now creates LIST&rarr;RANGE partitions against it. Additionally, the inline partition-creation code in <code>loadDailyTestAnalysisByJob</code> that created date-based RANGE partitions was removed, so no new partitions will be created for the old schema either.</p>
+</div>
+
+<h3>Resolved</h3>
+
+<div class="finding" style="border-left-color:#2da44e;">
+  <p><span class="severity" style="background:#dafbe1;color:#116329;border:1px solid #2da44e66;">Resolved</span> <strong>Unresolved uncertainty about migration ordering</strong></p>
+  <p><code>pkg/db/db.go:100-103</code></p>
+  <p>The uncertain comments ("unsure if we need to break out...", "FIRST??") were replaced with clear forward-looking notes in commit 6d2aa7777. The ordering is now RunMigrations &rarr; SetupJoinTable &rarr; AutoMigrate with a note that AutoMigrate may need to run first when <code>prow_job_runs</code> moves to managed migrations in phase 4b.</p>
+</div>
+
+<h3>Should Fix</h3>
+
+<div class="finding finding-should-fix">
+  <p><span class="severity should-fix">Should Fix</span> <strong><code>gopar</code> is a pre-release personal dependency by the PR author</strong></p>
+  <p><code>go.mod:27</code></p>
+  <pre>github.com/neisw/gopar v0.0.0-20260602170650-3755a6d55bbe</pre>
+  <p>This pre-release library authored by the same person submitting the PR becomes a critical infrastructure dependency (partition lifecycle management). The code looks reasonable (proper SQL injection prevention), but it should have explicit team review/ownership. Consider moving it under the org or tagging a v0.1.0 release.</p>
+</div>
+
+<div class="finding finding-should-fix">
+  <p><span class="severity should-fix">Should Fix</span> <strong><code>force_custom_plan</code> and <code>work_mem</code> applied globally to all connections</strong></p>
+  <p><code>pkg/db/db.go:67-72</code></p>
+  <pre>pgxConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
+pgxConfig.RuntimeParams["work_mem"] = "128MB"</pre>
+  <p>Both settings are applied to all connections. <code>force_custom_plan</code> prevents plan caching for any prepared statement. <code>work_mem = "128MB"</code> (added in 6ecf3771f) sets memory per sort/hash operation &mdash; with connection pooling, this could mean significant total memory usage. Consider documenting the measured trade-off or scoping if possible.</p>
+</div>
+
+<div class="finding finding-should-fix">
+  <p><span class="severity should-fix">Should Fix</span> <strong><code>TestOutputs</code> query adds status filter &mdash; behavioral change beyond partitioning</strong></p>
+  <p><code>pkg/db/query/test_queries.go:284</code></p>
+  <pre>Where("prow_job_run_tests.status IN ?",
+    []int{int(v1.TestStatusFailure), int(v1.TestStatusFlake)})</pre>
+  <p>Previously all test outputs were returned regardless of status. This is a semantic change beyond the partitioning refactor. If intentional (outputs only exist for failures/flakes), it should be called out explicitly. If not, it silently filters data.</p>
+</div>
+
+<div class="finding finding-should-fix">
+  <p><span class="severity should-fix">Should Fix</span> <strong><code>TestOutputs</code> join on <code>prow_job_run_test_outputs</code> missing release column</strong></p>
+  <p><code>pkg/db/query/test_queries.go:279</code></p>
+  <pre>Joins("JOIN prow_job_run_test_outputs ON
+    prow_job_run_test_outputs.prow_job_run_test_id = prow_job_run_tests.id
+    AND prow_job_run_test_outputs.prow_job_run_test_timestamp
+        = prow_job_run_tests.prow_job_run_timestamp")</pre>
+  <p>The join matches on <code>id</code> + <code>timestamp</code> but omits <code>release</code>. With both tables LIST-partitioned by release, cross-partition ID collisions are theoretically possible. The join should also include <code>prow_job_run_test_outputs.prow_job_run_test_release = prow_job_run_tests.prow_job_run_release</code>.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding finding-nit">
+  <p><span class="severity nit">Nit</span> <strong>Hardcoded retention constants</strong></p>
+  <p><code>pkg/db/db.go:336-340</code></p>
+  <p><code>CleanupPartitions</code> uses hardcoded 100-day detach and 110-day drop thresholds. These should be configurable via flags or environment variables for different deployment environments.</p>
+</div>
+
+<div class="finding finding-nit">
+  <p><span class="severity nit">Nit</span> <strong>Seed data creates partitions for 190-day range</strong></p>
+  <p><code>cmd/sippy/seed_data.go:74</code></p>
+  <p><code>time.Now().AddDate(0, 0, -190)</code> at daily granularity across 3 tables &times; N releases creates thousands of partitions on seed init. Could be slow for development setup.</p>
+</div>
+
+<div class="finding finding-nit">
+  <p><span class="severity nit">Nit</span> <strong><code>DB_PARTITIONS</code> type name violates Go conventions</strong></p>
+  <p><code>vendor/github.com/neisw/gopar/partitioning/partitions.go:23</code></p>
+  <p>Should be <code>DBPartitions</code> per Go naming conventions. Minor since it's in the vendored dependency.</p>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding finding-question">
+  <p><span class="severity question">Question</span> <strong>ProwJobRunTest/ProwJobRunTestOutput excluded from AutoMigrate &mdash; future column additions?</strong></p>
+  <p><code>pkg/db/db.go:128-129</code></p>
+  <p>With these models commented out of <code>modelsToMigrate</code>, any future schema changes require manual migration SQL. Is there a plan to document this for contributors?</p>
+</div>
+
+<div class="finding finding-question">
+  <p><span class="severity question">Question</span> <strong>Orphan detection from phase 4 plan &mdash; will it be implemented?</strong></p>
+  <p><code>docs/plans/trt-1989-phase4-partitioned-tables.md</code> (monitoring section)</p>
+  <p>The plan doc includes orphan detection queries, but no code implements periodic monitoring. With FKs dropped, orphan rows can accumulate silently.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>SQL injection safety in gopar: uses <code>pq.QuoteIdentifier</code>/<code>pq.QuoteLiteral</code> throughout</li>
+  <li>Query optimization changes in <code>views.go</code>, <code>functions.go</code>: join drops are consistent with denormalized column availability</li>
+  <li>Component Readiness queries (<code>provider.go</code>): parameter binding matches expanded placeholder lists</li>
+  <li>Partition naming/sanitization logic in gopar handles edge cases (dots, spaces, long names)</li>
+  <li><code>ProwJobRunProwPullRequest</code> model changes: index tags added correctly</li>
+  <li>e2e partition test coverage: lifecycle test is thorough</li>
+  <li><code>ensurePartitionsForReleases</code> in <code>load.go</code>: error handling appropriate (returns on partition creation failure, warns on cleanup failure)</li>
+  <li><code>ProwJobHistoricalTestCounts</code> signature change: all callers updated to pass release</li>
+  <li>Materialized view changes: <code>|||TIMENOW|||</code> template tokens used correctly</li>
+  <li><em>(refresh)</em> Release filter additions in <code>job_runs.go</code>, <code>job_queries.go</code>, <code>test_queries.go</code>, <code>pr_new_tests_worker.go</code>: all correctly add <code>prow_job_run_release</code> for partition pruning</li>
+  <li><em>(refresh)</em> New benchmark tests in <code>postgres_benchmarking_test.go</code> (+491 lines): cover matview, API, and single-release matview scenarios &mdash; well structured</li>
+  <li><em>(refresh)</em> <code>QueryTestAnalysis</code> now filters on <code>release</code>: all callers updated consistently</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Has the migration been tested on a database that already has golang-migrate version 1 applied (the old <code>test_analysis_by_job_by_dates</code> RANGE migration)?</li>
+  <li>Is <code>force_custom_plan</code> measurably impacting non-partitioned query performance? Any benchmarks? Same question for the new <code>work_mem = 128MB</code> setting.</li>
+  <li>What's the plan for getting <code>gopar</code> to a stable release or moving it under the org?</li>
+  <li>Is the status filter addition in <code>TestOutputs</code> intentional? If so, is there separate behavioral validation?</li>
+</ul>
+
+</div>
+</body>
+</html>
