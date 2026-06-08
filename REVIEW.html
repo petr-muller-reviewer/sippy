@@ -48,9 +48,9 @@
   <p><strong>Author:</strong> neisw</p>
   <p><strong>Link:</strong> <a href="https://github.com/openshift/sippy/pull/3542">github.com/openshift/sippy/pull/3542</a></p>
   <p><strong>Base:</strong> main</p>
-  <p><strong>Head SHA:</strong> <code>912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9</code></p>
-  <p><strong>Reviewed at:</strong> 2026-06-03T11:29:02Z</p>
-  <p><strong>Previous reviews:</strong> 2026-06-01T16:01:20Z at <code>0e1bda0e6ed5a7a6b2b18cf49f1e7d99d8b029ab</code>, 2026-05-30T12:41:23Z at <code>6e7dde01a7da7ad9156698526f0819405e871d31</code>, 2026-05-26T18:09:05Z at <code>35565d2a34587c629ea0c366c8e71d5da75fff8a</code>, 2026-05-20T10:15:15Z at <code>0cf023a1d146521758e3cee0444233da4c0a90cd</code></p>
+  <p><strong>Head SHA:</strong> <code>6d2aa777780c2e4dfeb483f3c34ea62b82087bd8</code></p>
+  <p><strong>Reviewed at:</strong> 2026-06-08T16:53:16Z</p>
+  <p><strong>Previous reviews:</strong> 2026-06-03T11:29:02Z at <code>912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9</code>, 2026-06-01T16:01:20Z at <code>0e1bda0e6ed5a7a6b2b18cf49f1e7d99d8b029ab</code>, 2026-05-30T12:41:23Z at <code>6e7dde01a7da7ad9156698526f0819405e871d31</code>, 2026-05-26T18:09:05Z at <code>35565d2a34587c629ea0c366c8e71d5da75fff8a</code>, 2026-05-20T10:15:15Z at <code>0cf023a1d146521758e3cee0444233da4c0a90cd</code></p>
 </div>
 
 <div class="verdict">
@@ -64,6 +64,7 @@
   <br><strong>Refresh (2026-06-01):</strong> 1 new commit (+104/-10). <code>TestOutputs</code> refactored: starts from <code>prow_job_run_tests</code>, join to outputs uses timestamp equality for partition pruning, <code>status IN (failure, flake)</code> filter added. <code>JobDetailsReport</code> preload gains partitioning conditions. Author posted comparison: 16=16 exact match, old query 4h41m → new 247ms. openshift-merge-bot triggered e2e tests.
   <br><strong>Refresh (2026-06-02):</strong> PR rebased onto main (all prior SHAs changed). 1 genuinely new commit (<code>912c2faec</code>): <code>force_custom_plan</code> global connection parameter via pgx stdlib adapter (prevents 17+ min planning on 10k+ partitions); <code>ProwJobHistoricalTestCounts</code> gains <code>release</code> param; <code>test_analysis_by_job_by_dates</code> gets release filter. CI: <code>yaml-lint</code> and <code>images</code> build failing at PR head.
   <br><strong>Refresh (2026-06-03):</strong> No code changes. neisw retested CI (<code>/test images</code>), requested CodeRabbit re-review. CodeRabbit CHANGES_REQUESTED: (1) <code>historicalTestCount</code> cache keyed only by job ID but now returns release-scoped counts — stale cache on multi-release jobs (should-fix); (2) <code>pgx/v4</code> at <code>v4.18.2</code>, <code>v4.18.3</code> is latest, v4 EOL Jul 2025 (nit). openshift-merge-bot triggered e2e.
+  <br><strong>Refresh (2026-06-08):</strong> PR rebased again. 1 new squashed commit (<code>6d2aa7777</code>): <code>work_mem=128MB</code> runtime param; AutoMigrate skips <code>ProwJobRunTest</code>/<code>ProwJobRunTestOutput</code> during migration period (creates only if table missing); <code>JobRunTestCount</code>/<code>QueryTestAnalysis</code>/<code>IsNewTest</code>/<code>ranTest</code> subquery gain release filters; matview gets ORDER BY. +375 lines of benchmark tests. neisw addressed CodeRabbit doc nits, confirmed pgx v5 deferred. CodeRabbit APPROVED. CI all-pass (2026-06-07). Label: <code>ready-for-human-review</code>.
 </div>
 
 <h2>What This PR Does</h2>
@@ -95,6 +96,13 @@
 <ul>
   <li>No code changes. neisw retested CI (<code>/test images</code>), requested CodeRabbit re-review. openshift-merge-bot triggered e2e tests.</li>
   <li>CodeRabbit CHANGES_REQUESTED: <code>historicalTestCount</code> cache bug (keyed by job ID only, but counts are now release-scoped) and pgx/v4 version nit (v4.18.3 available, v4 EOL Jul 2025).</li>
+</ul>
+<p><strong>Since previous review (2026-06-03):</strong></p>
+<ul>
+  <li>PR rebased again. 1 new squashed commit (<code>6d2aa7777</code>). +416/-13 vs previous head; 375 lines are benchmark tests.</li>
+  <li><code>pkg/db/db.go</code>: <code>work_mem = "128MB"</code> runtime param added. <code>ProwJobRunTest</code>/<code>ProwJobRunTestOutput</code> removed from AutoMigrate; new <code>modelsToInitialize</code> loop creates them only on fresh databases.</li>
+  <li>Release filters added to <code>JobRunTestCount</code>, <code>QueryTestAnalysis</code>, <code>IsNewTest</code>, and <code>JobsRunsReportFromDB</code> ranTest subquery. <code>testAnalysisByJobMatView</code> gains ORDER BY.</li>
+  <li>neisw addressed CodeRabbit doc nits, confirmed pgx v5 migration deferred. CodeRabbit APPROVED (2026-06-05). CI all-pass (2026-06-07). Label: <code>ready-for-human-review</code>.</li>
 </ul>
 
 <h2>Findings</h2>
@@ -150,10 +158,23 @@ if !ok {
   <pre><code>pgxConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"</code></pre>
 </div>
 
-<div class="finding severity-nit">
-  <div class="finding-title"><span class="badge badge-nit">nit</span> CI failing at current PR head</div>
-  <div class="location">PR CI at <code>912c2faec</code></div>
-  <p><code>openshift-ci[bot]</code> reported (2026-06-02) <code>ci/prow/yaml-lint</code> and <code>ci/prow/images</code> failing. neisw ran <code>/test images</code> on 2026-06-03; result not yet confirmed. openshift-merge-bot triggered e2e. PR should not merge until <code>images</code> passes.</p>
+<div class="finding severity-question">
+  <div class="finding-title"><span class="badge badge-question">question</span> <code>work_mem = "128MB"</code> set globally on all connections</div>
+  <div class="location"><code>pkg/db/db.go:68</code></div>
+  <p>PostgreSQL default is 4MB. 128MB is a large per-operation allocation — each sort, hash join, or hash aggregate can consume this much memory. With concurrent connections in serve mode, total memory usage could grow significantly. Was this value tested under production-like concurrency? Is it sized for specific large queries?</p>
+  <pre><code>pgxConfig.RuntimeParams["work_mem"] = "128MB"</code></pre>
+</div>
+
+<div class="finding severity-question">
+  <div class="finding-title"><span class="badge badge-question">question</span> AutoMigrate skip for partitioned tables during migration period</div>
+  <div class="location"><code>pkg/db/db.go:140-161</code></div>
+  <p><code>ProwJobRunTest</code> and <code>ProwJobRunTestOutput</code> removed from the main <code>modelsToMigrate</code> list. New <code>modelsToInitialize</code> loop creates them only if the table doesn't exist (<code>HasTable</code> check). Correct for the migration period, but the comment "disabled during migration period" doesn't explain what happens post-migration. Should these models return to the main list after partitioning is complete, or is the <code>HasTable</code> guard permanent?</p>
+</div>
+
+<div class="finding severity-nit" style="opacity:0.6;">
+  <div class="finding-title"><span class="badge badge-nit" style="background:#28a745">resolved</span> CI failing at current PR head</div>
+  <div class="location">PR CI at <code>912c2faec</code> (now <code>6d2aa7777</code>)</div>
+  <p>All tests passed as of 2026-06-07T13:17:45. openshift-ci[bot] confirmed.</p>
 </div>
 
 <div class="finding severity-question">
@@ -191,7 +212,7 @@ WHERE prowjob_build_id IN UNNEST(@BuildIDs)
 <div class="finding severity-nit">
   <div class="finding-title"><span class="badge badge-nit">nit</span> pgx/v4 at v4.18.2; v4.18.3 is latest, v4 is EOL</div>
   <div class="location"><code>go.mod:23</code></div>
-  <p>PR promotes <code>github.com/jackc/pgx/v4</code> to a direct dependency at <code>v4.18.2</code>. Latest patch is <code>v4.18.3</code>. No CVEs specific to <code>v4.18.2</code> (CVE-2024-27289 and CVE-2024-27304 were fixed in earlier releases). However, pgx v4 reached end-of-life July 1, 2025. Pinning a new direct dependency to an EOL minor series warrants a follow-up migration to pgx v5.</p>
+  <p>PR promotes <code>github.com/jackc/pgx/v4</code> to a direct dependency at <code>v4.18.2</code>. pgx v4 reached EOL July 1, 2025. Author confirmed (2026-06-05) pgx v5 migration will be a separate PR — scoped ~6 files touching pgtype.JSONB/Date, plus GORM/driver upgrade. Low urgency, tracked.</p>
 </div>
 
 <div class="finding severity-nit">
@@ -225,6 +246,13 @@ WHERE prowjob_build_id IN UNNEST(@BuildIDs)
   <li><code>ProwJobHistoricalTestCounts</code> release param: all three call sites updated (<code>job_queries.go</code> benchmark, <code>job_runs.go</code> risk analysis, <code>pr_new_tests_worker.go</code>). Raw SQL parameter order matches: <code>prowJobID, release</code>.</li>
   <li><code>test_analysis_by_job_by_dates.release</code> filter: adds local release scoping alongside the existing <code>prow_jobs.release</code> join filter — redundant/safe approach consistent with the pattern used elsewhere.</li>
   <li><code>pgx/v4</code> promoted from indirect to direct in <code>go.mod</code>: consistent with its explicit use in <code>db.go</code>.</li>
+  <li><code>JobRunTestCount</code> release param: call site in <code>FetchJobRun</code> passes <code>jobRun.ProwJobRelease</code> — correct.</li>
+  <li><code>QueryTestAnalysis</code> SQL: <code>release = ?</code> added to <code>test_analysis_by_job_by_dates</code> query; parameter order correct at all call sites.</li>
+  <li><code>JobsRunsReportFromDB</code> ranTest subquery: join-style equality <code>prow_job_run_tests.prow_job_run_release = prow_job_runs_report_matview.release</code> — correct, no standalone param needed.</li>
+  <li><code>IsNewTest</code> release filter: <code>t.prow_job_run_release = ?</code> with <code>testRun.ProwJobRunRelease</code> — correct.</li>
+  <li><code>testAnalysisByJobMatView</code> ORDER BY: deterministic ordering by release, then test name — safe, no behavior change.</li>
+  <li><code>modelsToInitialize</code> HasTable logic: correct for migration period — prevents AutoMigrate from altering partitioned tables while creating them for fresh databases.</li>
+  <li>New benchmark suites (<code>Test_BenchmarkMatviews</code>, <code>Test_BenchmarkAPI</code>): structurally correct, reuse existing helpers.</li>
 </ul>
 </div>
 
@@ -236,9 +264,11 @@ WHERE prowjob_build_id IN UNNEST(@BuildIDs)
   <li><code>GatherLabelsFromBQ</code>: was the date filter relaxation (<code>= DATE(...)</code> to <code>>= DATE(...)</code>) intentional? Is the lack of an upper bound acceptable for BigQuery cost? Why rename <code>StartTime</code> to <code>ReleaseTime</code> when the caller still passes <code>pj.Status.StartTime</code>?</li>
   <li><code>TestOutputs</code>: is the new <code>status IN (failure, flake)</code> filter intentional? The old query had no status filter; callers expecting outputs for passing tests will now get empty results.</li>
   <li><code>force_custom_plan</code>: was the global scope (all connections, all queries) intentional? Were per-query alternatives considered? What is the expected overhead on non-partitioned queries in production?</li>
-  <li>CI: <code>ci/prow/images</code> was failing at <code>912c2faec</code>; neisw retested 2026-06-03. Did it pass?</li>
-  <li><code>historicalTestCount</code> cache: will the composite key fix (<code>"jobID:release"</code>) be added before merge?</li>
-  <li>pgx/v4 EOL (Jul 2025): is there a plan to migrate to v5?</li>
+  <li><s>CI: <code>ci/prow/images</code> was failing at <code>912c2faec</code></s> — Resolved. All tests passed at <code>6d2aa7777</code> (2026-06-07).</li>
+  <li><code>historicalTestCount</code> cache: the composite key fix (<code>"jobID:release"</code>) has still not been addressed as of <code>6d2aa7777</code>. Will it be added before merge?</li>
+  <li><s>pgx/v4 EOL</s> — Author confirmed v5 migration deferred to separate PR (2026-06-05).</li>
+  <li><code>work_mem = "128MB"</code>: what drove this value? Was it tested under production concurrency? PostgreSQL default is 4MB; 128MB per-operation could drive high total memory usage.</li>
+  <li>AutoMigrate skip for <code>ProwJobRunTest</code>/<code>ProwJobRunTestOutput</code>: is this intended to be permanent or temporary? What signals the end of the "migration period"?</li>
 </ul>
 
 </div>

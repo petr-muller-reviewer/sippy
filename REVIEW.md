@@ -1,9 +1,9 @@
 ---
 pr: openshift/sippy#3542
 title: "Trt 1989 migration queries"
-head_sha: 912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9
+head_sha: 6d2aa777780c2e4dfeb483f3c34ea62b82087bd8
 base: main
-reviewed_at: 2026-06-03T11:29:02Z
+reviewed_at: 2026-06-08T16:53:16Z
 verdict: needs-discussion
 refresh_log:
   - previous_sha: 0cf023a1d146521758e3cee0444233da4c0a90cd
@@ -21,6 +21,9 @@ refresh_log:
   - previous_sha: 912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9
     new_sha: 912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9
     summary: "No code changes. Activity: neisw retested images (/test images), requested CodeRabbit re-review. CodeRabbit CHANGES_REQUESTED: (1) historicalTestCount cache keyed only by job ID but now returns release-scoped counts — stale cache on multi-release jobs; (2) pgx/v4 at v4.18.2, v4.18.3 is latest, v4 EOL Jul 2025. openshift-merge-bot triggered e2e."
+  - previous_sha: 912c2faec06c5a056ab3520c1cbe7ba9ae8e44a9
+    new_sha: 6d2aa777780c2e4dfeb483f3c34ea62b82087bd8
+    summary: "PR rebased again. 1 new squashed commit (6d2aa7777): work_mem=128MB runtime param, AutoMigrate skips ProwJobRunTest/ProwJobRunTestOutput during migration period (checks HasTable first), JobRunTestCount/QueryTestAnalysis/IsNewTest gain release filters, JobsRunsReportFromDB ranTest subquery adds release equality, testAnalysisByJobMatView adds ORDER BY. +375 lines of matview+API benchmark tests. neisw addressed CodeRabbit doc nits and confirmed pgx v5 migration deferred. CodeRabbit APPROVED. CI all-pass (2026-06-07). Label added: ready-for-human-review."
 ---
 
 Since previous review (2026-05-26): 8 new commits. Key changes:
@@ -43,6 +46,19 @@ Since previous review (2026-06-01): PR rebased onto main. 1 genuinely new commit
 Since previous review (2026-06-02): No code changes.
 - neisw retested CI: `/test images` (2026-06-03T00:38).
 - neisw requested CodeRabbit re-review; CodeRabbit posted CHANGES_REQUESTED (2026-06-03T00:49) with two actionable findings (see new findings below). openshift-merge-bot triggered e2e tests.
+
+Since previous review (2026-06-03): PR rebased again. 1 new squashed commit (`6d2aa7777`, Jun 4). +416/-13 vs previous head; 375 lines are benchmark tests.
+- `pkg/db/db.go`: Adds `work_mem = "128MB"` runtime parameter. `ProwJobRunTest` and `ProwJobRunTestOutput` removed from `modelsToMigrate` and commented out during migration period; new `modelsToInitialize` loop creates these tables only if they don't already exist (`HasTable` check).
+- `pkg/db/query/job_queries.go`: `JobRunTestCount` gains `release string` param, adds `Where("prow_job_run_release = ?", release)`.
+- `pkg/db/query/test_queries.go`: `QueryTestAnalysis` SQL gains `AND release = ?` on `test_analysis_by_job_by_dates`.
+- `pkg/api/job_runs.go`: `FetchJobRun` passes `jobRun.ProwJobRelease` to `JobRunTestCount`. `jobNamesTestResultFunc` gains `release` param, passes it to `QueryTestAnalysis`. `JobsRunsReportFromDB` ranTest subquery adds `prow_job_run_tests.prow_job_run_release = prow_job_runs_report_matview.release`.
+- `pkg/sippyserver/pr_new_tests_worker.go`: `IsNewTest` adds `Where("t.prow_job_run_release = ?", testRun.ProwJobRunRelease)`.
+- `pkg/db/views.go`: `testAnalysisByJobMatView` adds `ORDER BY prow_job_run_tests.prow_job_run_release, tests.name`.
+- `pkg/flags/postgres_benchmarking_test.go`: +375 lines — three new benchmark suites (`Test_BenchmarkMatviews`, `Test_BenchmarkAPI`) and `testAnalysisPageFilter` helper.
+- neisw addressed CodeRabbit nits on docs placement (2026-06-05), confirmed pgx v5 migration will be separate.
+- CodeRabbit APPROVED (2026-06-05T12:33:44).
+- CI: all tests passed (openshift-ci[bot] confirmed 2026-06-07T13:17:45).
+- Label added: `ready-for-human-review`.
 
 ## Findings
 
@@ -86,9 +102,19 @@ Since previous review (2026-06-02): No code changes.
 - excerpt: |
     pgxConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
 
-### [nit] CI failing at current PR head
-- where: PR CI at `912c2faec`
-- concern: `openshift-ci[bot]` reported (2026-06-02) `ci/prow/yaml-lint` and `ci/prow/images` failing. neisw ran `/test images` on 2026-06-03; result not yet confirmed. openshift-merge-bot triggered e2e tests. PR should not merge until `images` passes.
+### [question] `work_mem = "128MB"` set globally on all connections
+- where: `pkg/db/db.go:68`
+- concern: The new commit adds `pgxConfig.RuntimeParams["work_mem"] = "128MB"` alongside `force_custom_plan`. The PostgreSQL default is 4MB. 128MB is a large per-operation allocation — each sort, hash join, or hash aggregate can consume up to this much memory. With concurrent connections (serve mode), this could drive up total memory usage significantly. Was this value tested under production-like concurrency? Is it sized for specific large queries (the partitioned table scans), or was it a general "more is better" choice?
+- excerpt: |
+    pgxConfig.RuntimeParams["work_mem"] = "128MB"
+
+### [question] AutoMigrate skip for partitioned tables during migration period
+- where: `pkg/db/db.go:140-161`
+- concern: `ProwJobRunTest` and `ProwJobRunTestOutput` are removed from the main `modelsToMigrate` list and handled separately: if the table doesn't exist, create it; otherwise skip. This protects existing (soon-to-be-partitioned) tables from `AutoMigrate` altering them. The `HasTable` check is correct, but the comment "disabled during migration period" doesn't explain what should happen post-migration. When the partitioning is complete, should these models return to the main list, or should the `HasTable` guard remain permanent? A TODO with the expected resolution would help.
+
+### [resolved] CI failing at current PR head
+- where: PR CI at `912c2faec` (now `6d2aa7777`)
+- resolved: All tests passed as of 2026-06-07T13:17:45. openshift-ci[bot] confirmed.
 
 ### [question] BuildClusterHealth named param mixing
 - where: `pkg/db/query/build_clusters.go:30-35`
@@ -112,7 +138,8 @@ Since previous review (2026-06-02): No code changes.
 
 ### [nit] pgx/v4 at v4.18.2; v4.18.3 is latest, v4 is EOL
 - where: `go.mod:23`
-- concern: PR promotes `github.com/jackc/pgx/v4` to a direct dependency at `v4.18.2`. The latest patch is `v4.18.3`. CodeRabbit confirmed no CVEs specific to `v4.18.2` (CVE-2024-27289 and CVE-2024-27304 were fixed in earlier releases). However, pgx v4 reached end-of-life on July 1, 2025. Pinning a new direct dependency to an EOL minor series is worth noting — a follow-up migration to pgx v5 should be tracked.
+- concern: PR promotes `github.com/jackc/pgx/v4` to a direct dependency at `v4.18.2`. The latest patch is `v4.18.3`. pgx v4 reached EOL July 1, 2025.
+- note: Author confirmed (2026-06-05) pgx v5 migration will be a separate PR. Scoped the migration (~6 files touch pgtype.JSONB/Date, GORM + driver upgrade needed). Low urgency, tracked.
 
 ### [nit] Plan docs committed to `docs/plans/`
 - where: `docs/plans/trt-1989-partitioning-prep.md`, `docs/plans/trt-1989-phase2-indexes.md`, `docs/plans/trt-1989-phase3-query-optimization.md`
@@ -143,6 +170,13 @@ Since previous review (2026-06-02): No code changes.
 - `ProwJobHistoricalTestCounts` release param: all three call sites updated (`job_queries.go` benchmark, `job_runs.go` risk analysis, `pr_new_tests_worker.go`). Raw SQL parameter order matches: `prowJobID, release`.
 - `test_analysis_by_job_by_dates.release` filter: adds local release scoping without dropping the `prow_jobs.release` join filter — redundant/safe approach.
 - `pgx/v4` promoted from indirect to direct in `go.mod`: consistent with its explicit use in `db.go`.
+- `JobRunTestCount` release param: call site in `FetchJobRun` passes `jobRun.ProwJobRelease` — correct field.
+- `QueryTestAnalysis` SQL: `release = ?` added to `test_analysis_by_job_by_dates` query; parameter order correct at call sites (`analyzeSince, testName, jobNames, release`).
+- `JobsRunsReportFromDB` ranTest subquery: `prow_job_run_tests.prow_job_run_release = prow_job_runs_report_matview.release` — correct join-style equality, no standalone param needed.
+- `IsNewTest` release filter: `t.prow_job_run_release = ?` with `testRun.ProwJobRunRelease` — correct.
+- `testAnalysisByJobMatView` ORDER BY addition: deterministic ordering by release, then test name — safe, no behavior change.
+- `modelsToInitialize` HasTable logic: correct for migration period — prevents AutoMigrate from altering partitioned tables while still creating them for fresh databases.
+- New benchmark suites (`Test_BenchmarkMatviews`, `Test_BenchmarkAPI`): structurally correct, reuse existing helpers.
 
 ## Open questions
 - What is the deployment ordering plan? Will backfill run before this code goes live, or are the dropped-join queries expected to degrade gracefully?
@@ -151,6 +185,8 @@ Since previous review (2026-06-02): No code changes.
 - `GatherLabelsFromBQ`: was the date filter relaxation (`= DATE(...)` to `>= DATE(...)`) intentional, and is the lack of an upper bound acceptable for BigQuery cost?
 - `TestOutputs`: is the new `status IN (failure, flake)` filter intentional? The old query had no status filter, so callers expecting outputs for passing tests will now get empty results.
 - `force_custom_plan`: was the global scope (all connections, all queries) intentional? Were per-query or per-table alternatives considered? What's the expected overhead on non-partitioned queries?
-- CI: `ci/prow/images` was failing at `912c2faec`; neisw retested 2026-06-03. Did it pass?
-- `historicalTestCount` cache: will the composite key fix (`"jobID:release"`) be added before merge?
-- pgx/v4 EOL (Jul 2025): is there a plan to migrate to v5?
+- ~~CI: `ci/prow/images` was failing at `912c2faec`~~ — Resolved. All tests passed at `6d2aa7777` (2026-06-07).
+- `historicalTestCount` cache: the composite key fix (`"jobID:release"`) has still not been addressed as of `6d2aa7777`. Will it be added before merge?
+- ~~pgx/v4 EOL~~ — Author confirmed v5 migration deferred to separate PR (2026-06-05).
+- `work_mem = "128MB"`: what drove this value? Was it tested under production concurrency? PostgreSQL default is 4MB; 128MB per-operation could drive high total memory usage.
+- AutoMigrate skip for `ProwJobRunTest`/`ProwJobRunTestOutput`: is this intended to be permanent or temporary? What signals the end of the "migration period"?
