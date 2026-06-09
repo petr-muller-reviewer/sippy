@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3556 — WIP: junit clustering</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 52em; margin: 2em auto; padding: 0 1em; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #0969da; padding-bottom: .3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: .2em; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: .15em .3em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; overflow-x: auto; border-radius: 6px; font-size: 0.85em; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5em; }
+  .meta td { padding: .15em .6em .15em 0; vertical-align: top; }
+  .meta td:first-child { font-weight: 600; white-space: nowrap; }
+  .verdict { padding: .8em 1em; border-radius: 6px; margin-bottom: 1.5em; }
+  .verdict.approve { background: #dafbe1; border-left: 4px solid #1a7f37; }
+  .severity { display: inline-block; font-size: .75em; font-weight: 700; text-transform: uppercase; padding: .15em .5em; border-radius: 3px; margin-right: .4em; vertical-align: middle; }
+  .severity.blocking { background: #ffebe9; color: #82071e; }
+  .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.nit { background: #ddf4ff; color: #0550ae; }
+  .severity.question { background: #f0e6ff; color: #5e2ca5; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: .3em; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3556</h1>
+
+<div class="meta">
+<table>
+  <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3556">openshift/sippy#3556</a></td></tr>
+  <tr><td>Title</td><td>WIP: junit clustering</td></tr>
+  <tr><td>Author</td><td>dgoodwin</td></tr>
+  <tr><td>Head SHA</td><td><code>5d3941ab6fce1b3983714b6096988f96627585c0</code></td></tr>
+  <tr><td>Base</td><td>main</td></tr>
+  <tr><td>Reviewed</td><td>2026-05-26T23:59:33Z</td></tr>
+  <tr><td>Changes</td><td>+352 lines, 1 file (documentation only)</td></tr>
+</table>
+</div>
+
+<div class="verdict approve">
+  <strong>Approve.</strong>
+  High-quality proposal backed by real cost data, a correct diagnosis of the current query path, and experimental validation. The suggestions below are refinements worth addressing before implementation begins, but none block merging this planning document.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a proposal document at <code>docs/plans/bigquery-junit-clustering-proposal.md</code> for clustering the 9.3-billion-row <code>junit</code> BigQuery table by a new <code>release</code> column.</li>
+  <li>Diagnoses that current release filtering happens post-scan via a JOIN to <code>job_variants</code>, costing ~$36K/month for ~55K queries.</li>
+  <li>Justifies a new <code>release</code> column over the existing <code>branch</code> column with a 4.55% mismatch analysis across four concrete failure categories of the regex-based branch derivation.</li>
+  <li>Includes experimental validation: a clustered copy of the table reduced a representative query from 214 GB to 70 GB (67% reduction), matching the theoretical prediction.</li>
+  <li>Projects $264K-$327K annual savings with a ~$6 one-time backfill cost.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity should-fix">should-fix</span> Ingestion fallback to <code>branch</code> perpetuates mislabeling</h3>
+<p><code>docs/plans/bigquery-junit-clustering-proposal.md:289</code></p>
+<pre><code>release=get_release_for_job(self.prowjob_name) or self.branch,  # new field</code></pre>
+<p>The proposed ingestion code falls back to the regex-derived <code>branch</code> value for jobs not yet in the variant registry. The entire first half of the proposal demonstrates why <code>branch</code> is unreliable for release identification (4.55% mismatch). Falling back to it silently writes a potentially wrong <code>release</code> value into the clustered column. Using <code>NULL</code> would honestly mark unknown jobs and avoid clustering them into the wrong release block. Queries filtering on <code>release = @SampleRelease</code> would naturally exclude them, matching current behavior where unregistered jobs lack variant JOINs.</p>
+
+<h3><span class="severity should-fix">should-fix</span> Ingestion gap during CTAS rebuild not mitigated</h3>
+<p><code>docs/plans/bigquery-junit-clustering-proposal.md:198-207</code></p>
+<pre><code>Tradeoff: Requires pausing the ingestion Cloud Function for 10-30 minutes
+while the CTAS runs and the rename completes. Any junit data from Prow jobs
+that complete during this window will be permanently lost — the ingestion
+pipeline does not replay missed data.</code></pre>
+<p>The proposal acknowledges 10-30 minutes of permanent data loss but doesn't explore alternatives. For a $264K+/year savings initiative, the operational plan should describe whether the Cloud Function trigger can be disabled/re-enabled around the rename, or whether a two-phase approach (CTAS to <code>junit_v2</code>, then atomically switch readers while briefly pausing writes) could reduce the gap. Even a brief discussion of "we considered X but Y is simpler" would strengthen the proposal.</p>
+
+<h3><span class="severity question">question</span> Multi-release query savings estimate</h3>
+<p><code>docs/plans/bigquery-junit-clustering-proposal.md:155-167</code></p>
+<p>Component Readiness compares a base release against a sample release. The code in <code>querygenerators.go</code> uses separate CTEs for base and sample scans, each filtering on its respective release. The savings estimate should confirm whether these are truly independent scans (each benefiting from clustering independently) or whether BigQuery might combine them. This affects whether the real-world savings match the single-release projections.</p>
+
+<h3><span class="severity nit">nit</span> Cache staleness window not in risk table</h3>
+<p><code>docs/plans/bigquery-junit-clustering-proposal.md:319-327</code></p>
+<p>The 6-hour cache TTL means a newly added job in the variant registry could produce junit rows with the fallback <code>release</code> value for up to 6 hours. This is a minor operational detail but fits naturally in the Risk Assessment table alongside the existing "stale values after variant registry fix" entry.</p>
+
+<h3><span class="severity nit">nit</span> <code>update_junit_release.py</code> referenced but not listed as deliverable</h3>
+<p><code>docs/plans/bigquery-junit-clustering-proposal.md:329-350</code></p>
+<p>The correction script is described in detail with usage examples but isn't listed in the "Implementation Sequence" section as an explicit step/deliverable. Adding it as step 5 or a sub-item of step 4 would make the full scope of work clearer.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>Current query path diagnosis is accurate.</strong> Verified in <code>querygenerators.go</code>: release filtering via <code>jv_Release.variant_value = @BaseRelease</code> (lines 79, 151) after a LEFT JOIN to <code>job_variants</code> (lines 388-389, 553-554). This confirms the "filter after full scan" claim.</li>
+  <li><strong><code>@BaseRelease</code> and <code>@SampleRelease</code> parameters exist</strong> and are used as the proposal describes throughout the query generators.</li>
+  <li><strong><code>branch</code> column exists</strong> in the junit data structures (<code>pkg/api/tests.go</code>) and is indeed regex-derived.</li>
+  <li><strong><code>docs/plans/</code> directory already exists</strong> with other planning documents, so this follows an established pattern.</li>
+  <li><strong>No code changes, zero operational risk</strong> from merging this PR as-is.</li>
+  <li><strong>Cost projections are internally consistent.</strong> The 67% experimental reduction on release 4.22 (~34% of rows) aligns with the distribution data and the savings estimates.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>For jobs not in the variant registry, should <code>release</code> be <code>NULL</code> rather than falling back to the regex-derived <code>branch</code>? This avoids silently mislabeling rows in the clustered column, which is exactly the problem the new column is designed to solve.</li>
+  <li>Has anyone estimated the actual ingestion gap duration during the CTAS rebuild? Could the Cloud Function trigger be paused/resumed programmatically to bound the data loss window?</li>
+  <li>Do Component Readiness queries scan the junit table once with both releases or twice independently? This affects whether the per-release savings estimates can be summed or must be combined differently.</li>
+</ul>
+
+</body>
+</html>
