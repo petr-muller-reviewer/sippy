@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3588</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #24292f; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; background: #f6f8fa; padding: .15em .35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: .8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9em; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.2rem 0 .2rem; }
+  .verdict { background: #dafbe1; border-left: 4px solid #1a7f37; padding: .6rem 1rem; border-radius: 4px; margin-bottom: 1.5rem; }
+  .severity { display: inline-block; font-size: 0.75em; font-weight: 600; padding: .1em .5em; border-radius: 3px; text-transform: uppercase; vertical-align: middle; margin-right: .4rem; }
+  .sev-blocking { background: #ffebe9; color: #cf222e; }
+  .sev-should-fix { background: #fff8c5; color: #9a6700; }
+  .sev-nit { background: #ddf4ff; color: #0969da; }
+  .sev-question { background: #f6f8fa; color: #57606a; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: .3rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: TRT-2693: releasefallback panic</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3588">openshift/sippy#3588</a></dd>
+    <dt>Head SHA:</dt><dd><code>eb357be47cb2b9570446c4d8471886161e7bb027</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-06-09T12:47:44Z</dd>
+    <dt>Author:</dt><dd>sosiouxme</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Verdict: Approve.</strong>
+  Clean, focused bug fix addressing a nil-pointer panic and a latent deadlock. All three changes are logically related, the new helper is reusable, and the code is correct.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a nil-date guard in <code>FindStartEndTimesForRelease</code> so releases without a GA date produce an error instead of propagating nil pointers that later panic on dereference.</li>
+  <li>Extracts a generic <code>EnqueueAsync</code> helper that safely sends values on a channel from a synchronous context by wrapping in a <code>wg.Add</code>/goroutine/<code>wg.Done</code> bracket, fixing a deadlock risk in <code>RegressionTracker</code>.</li>
+  <li>Disables the <code>ReleaseFallback</code> middleware when the request targets a PR sample, since fallback releases are meaningless in that context and contributed to the crash path.</li>
+  <li>Typo fix and stale TODO cleanup.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-nit">nit</span> Unit test for nil-date case in FindStartEndTimesForRelease</h3>
+<p><code>pkg/api/componentreadiness/utils/utils.go:38-40</code></p>
+<pre><code>if r.Start == nil || r.End == nil {
+    return nil, nil, fmt.Errorf("release %s has no GA date", release)
+}</code></pre>
+<p>This nil-date guard is the root cause fix for the panic. A unit test covering <code>FindStartEndTimesForRelease</code> called with a <code>ReleaseTimeRange</code> that has nil <code>Start</code>/<code>End</code> would be a cheap regression guard. Not blocking since the logic is trivially correct.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>EnqueueAsync</code> correctly calls <code>wg.Add(1)</code> before spawning the goroutine and <code>wg.Done()</code> inside it, matching the caller's <code>wg.Wait()</code>/<code>close(errCh)</code> pattern in <code>component_report.go:362-367</code>. Fixes a real deadlock risk in <code>RegressionTracker.Query</code>/<code>QueryTestDetails</code> which previously did bare <code>errCh &lt;- err</code> from a synchronous context.</li>
+  <li>The bare <code>errCh &lt;- bsErr</code> at <code>releasefallback.go:246-248</code> is inside a goroutine already tracked by <code>wg.Add(1)</code>/<code>defer wg.Done()</code> (lines 230-232), so it does not need <code>EnqueueAsync</code>.</li>
+  <li>PR sample exclusion (<code>PullRequestOptions == nil</code> guard at <code>component_report.go:280</code>) correctly prevents fallback processing that is meaningless for PR samples.</li>
+  <li><code>QueryTestDetails</code> early return after <code>EnqueueAsync(wg, errCh, errs...)</code> at <code>releasefallback.go:198-199</code> is correct and avoids proceeding with nil/empty <code>timeRanges</code>.</li>
+  <li><code>getTestFallbackReleases</code> (line 377) has its own <code>End != nil &amp;&amp; Start != nil</code> guard, providing defense-in-depth for a separate code path.</li>
+  <li>Variable rename <code>errs</code> to <code>bsErrs</code> avoids shadowing the outer <code>errs</code> in the <code>QueryTestDetails</code> goroutine.</li>
+  <li>Typo fix ("degredation" to "degradation") and stale TODO removal.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Would you consider adding a unit test for <code>FindStartEndTimesForRelease</code> covering the nil-date case? It's the exact crash scenario and would be a cheap regression guard.</li>
+</ul>
+
+</body>
+</html>
