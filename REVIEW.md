@@ -1,10 +1,14 @@
 ---
 pr: openshift/sippy#3611
 title: "TRT-1989: standardize lookback and partition begin grace"
-head_sha: 49dd8c52414fe321daa4985dbcd8cc5fd6358bb4
+head_sha: 43555f5c9c8256ee29759800247e5b314f65f8fe
 base: main
-reviewed_at: 2026-06-12T10:42:28Z
+reviewed_at: 2026-06-12T15:26:59Z
 verdict: approve
+refresh_log:
+  - from: 49dd8c52414fe321daa4985dbcd8cc5fd6358bb4
+    to: 43555f5c9c8256ee29759800247e5b314f65f8fe
+    summary: "Author rebased onto main and added commit addressing mstaeble's nit: extracted resolveFrom() function to deduplicate loadSince-or-default pattern."
 ---
 
 ## Findings
@@ -21,9 +25,9 @@ verdict: approve
 - excerpt: |
     // https://github.com/openshift/sippy/blob/main/pkg/dataloader/prowloader/prow.go#L473 bq imports based on modified time which can include job_run_start_time a day earlier
 
-### [nit] Duplicated loadSince-or-default pattern
-- where: `pkg/dataloader/prowloader/prow.go:364-370`, `pkg/dataloader/prowloader/bigqueryjobs.go:22-30`
-- concern: `resolveLoadSince()` centralizes the pattern for `ensurePartitions`, but `getTestAnalysisByJobFromToDates` and `fetchProwJobsFromOpenShiftBigQuery` still inline the same `if loadSince != nil` logic. Three copies of the same default. Not a bug — all use `DefaultLookbackDays` — but a future change to the default would need to touch all three sites.
+### [resolved] Duplicated loadSince-or-default pattern
+- where: `pkg/dataloader/prowloader/prow.go:126-131`, `pkg/dataloader/prowloader/prow.go:367`
+- resolution: Author extracted standalone `resolveFrom(since *time.Time, to time.Time)`. `resolveLoadSince()` delegates to it, `getTestAnalysisByJobFromToDates` calls it directly. Two of three duplication sites eliminated. `bigqueryjobs.go:22-30` still inlines the pattern but has different semantics (side-effects on `pl.loadSince`).
 
 ### [question] No test for loadSince != nil in getTestAnalysisByJobFromToDates
 - where: `pkg/dataloader/prowloader/prow_test.go:176`
@@ -36,6 +40,11 @@ verdict: approve
 - Test signature change (`nil` third arg) preserves existing test semantics
 - No exported API changes
 
+## Since previous review
+- Author rebased onto main (picked up ~15 unrelated merges) and added `43555f5c9 TRT-1989: update resolveFrom`.
+- New commit extracts `resolveFrom()` as a standalone function, addressing mstaeble's inline nit and our "duplicated pattern" finding.
+- `resolveLoadSince()` now delegates to `resolveFrom()`; `getTestAnalysisByJobFromToDates` calls `resolveFrom()` directly, replacing the inline `if/else`.
+- mstaeble gave /lgtm, petr-muller approved with /hold to allow addressing the nit. LGTM was removed after the force-push. e2e tests passed on the new HEAD.
+
 ## Open questions
-- Would it make sense to refactor `getTestAnalysisByJobFromToDates` to accept a resolved `time.Time` (from `resolveLoadSince()`) instead of `*time.Time`, eliminating one copy of the pattern?
 - Should the partition grace also apply to the BQ query time range in `fetchProwJobsFromOpenShiftBigQuery`, or is the 12-hour job-runtime adjustment (line 36) sufficient there?

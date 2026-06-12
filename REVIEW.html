@@ -36,8 +36,8 @@
     <dt>Title:</dt><dd>TRT-1989: standardize lookback and partition begin grace</dd>
     <dt>Author:</dt><dd>neisw</dd>
     <dt>Base:</dt><dd>main</dd>
-    <dt>Head SHA:</dt><dd><code>49dd8c52414fe321daa4985dbcd8cc5fd6358bb4</code></dd>
-    <dt>Reviewed:</dt><dd>2026-06-12T10:42:28Z</dd>
+    <dt>Head SHA:</dt><dd><code>43555f5c9c8256ee29759800247e5b314f65f8fe</code></dd>
+    <dt>Reviewed:</dt><dd>2026-06-12T15:26:59Z</dd>
   </dl>
 </div>
 
@@ -52,7 +52,7 @@
 <h2>What this PR does</h2>
 <ul>
   <li>Introduces <code>DefaultLookbackDays = 14</code> constant and replaces three separate hardcoded fallback values (7 days in <code>ensurePartitions</code>, <code>14 * 24 * time.Hour</code> in the other two) with it.</li>
-  <li>Extracts a <code>resolveLoadSince()</code> helper method that returns <code>pl.loadSince</code> or falls back to <code>DefaultLookbackDays</code> ago; used by <code>ensurePartitions</code>.</li>
+  <li>Extracts a standalone <code>resolveFrom(since, to)</code> function encapsulating the <code>loadSince</code>-or-default logic; <code>resolveLoadSince()</code> delegates to it, and <code>getTestAnalysisByJobFromToDates</code> calls it directly.</li>
   <li>Adds a 1-day grace period to the partition start date in <code>ensurePartitions</code>, because BQ queries by <code>modified_time</code> can return rows whose <code>job_run_start_time</code> is a day earlier.</li>
   <li>Threads <code>pl.loadSince</code> into <code>getTestAnalysisByJobFromToDates</code> so that the new-DB bulk import respects the configured load-since rather than always defaulting.</li>
 </ul>
@@ -69,10 +69,10 @@
 <pre><code>// https://github.com/openshift/sippy/blob/main/pkg/dataloader/prowloader/prow.go#L473 bq imports based on modified time...</code></pre>
 <p>Line numbers in <code>blob/main</code> URLs drift as the file changes. A reference to the function name (<code>fetchProwJobsFromOpenShiftBigQuery</code>) would be more durable.</p>
 
-<h3><span class="severity sev-nit">nit</span> Duplicated loadSince-or-default pattern</h3>
-<p><code>pkg/dataloader/prowloader/prow.go:364-370</code>, <code>pkg/dataloader/prowloader/bigqueryjobs.go:22-30</code></p>
+<h3><span class="severity sev-nit" style="background:#e2e8f0;color:#475569;">resolved</span> Duplicated loadSince-or-default pattern</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:126-131</code>, <code>pkg/dataloader/prowloader/prow.go:367</code></p>
 <p>
-  <code>resolveLoadSince()</code> centralizes the pattern for <code>ensurePartitions</code>, but <code>getTestAnalysisByJobFromToDates</code> and <code>fetchProwJobsFromOpenShiftBigQuery</code> still inline the same <code>if loadSince != nil</code> logic. Three copies of the same default. Not a bug &mdash; all use <code>DefaultLookbackDays</code> now &mdash; but a future change to the default would need to touch all three sites.
+  <strong>Resolved:</strong> Author extracted a standalone <code>resolveFrom(since *time.Time, to time.Time)</code> function. <code>resolveLoadSince()</code> now delegates to it, and <code>getTestAnalysisByJobFromToDates</code> calls it directly. Two of three duplication sites eliminated. <code>bigqueryjobs.go:22-30</code> still inlines the pattern but has different semantics (side-effects on <code>pl.loadSince</code>).
 </p>
 
 <h3><span class="severity sev-question">question</span> No test for <code>loadSince != nil</code> in <code>getTestAnalysisByJobFromToDates</code></h3>
@@ -90,9 +90,16 @@
   <li>No exported API changes; no behavioral change for non-new databases.</li>
 </ul>
 
+<h2>Since previous review</h2>
+<ul>
+  <li>Author rebased onto main (picked up ~15 unrelated merges) and added <code>43555f5c9 TRT-1989: update resolveFrom</code>.</li>
+  <li>New commit extracts <code>resolveFrom()</code> as a standalone function, addressing mstaeble's inline nit and the "duplicated pattern" finding above.</li>
+  <li><code>resolveLoadSince()</code> now delegates to <code>resolveFrom()</code>; <code>getTestAnalysisByJobFromToDates</code> calls <code>resolveFrom()</code> directly, replacing the inline <code>if/else</code>.</li>
+  <li>mstaeble gave /lgtm, petr-muller approved with /hold to allow addressing the nit. LGTM was removed after the force-push. e2e tests passed on the new HEAD.</li>
+</ul>
+
 <h2>Open questions for the author</h2>
 <ul>
-  <li>Would it make sense to refactor <code>getTestAnalysisByJobFromToDates</code> to accept a resolved <code>time.Time</code> (from <code>resolveLoadSince()</code>) instead of <code>*time.Time</code>, eliminating one copy of the pattern?</li>
   <li>Should the partition grace also apply to the BQ query time range in <code>fetchProwJobsFromOpenShiftBigQuery</code>, or is the 12-hour job-runtime adjustment (line 36) sufficient there?</li>
 </ul>
 
