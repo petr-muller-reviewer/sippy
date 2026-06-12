@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3613</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-top: 2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f4f4f4; padding: 0.15em 0.35em; border-radius: 3px; }
+  .meta { background: #f8f9fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.92rem; }
+  .meta a { color: #0366d6; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .verdict { background: #dcffe4; border-left: 4px solid #28a745; padding: 0.6rem 1rem; margin-bottom: 1.5rem; border-radius: 0 4px 4px 0; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3613</h1>
+
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3613">openshift/sippy#3613</a><br>
+  <strong>Title:</strong> NO-JIRA: Change hypershift azure v2 job to standard<br>
+  <strong>Head SHA:</strong> <code>fad7e33208712b3f93261c4c1abc633c8d699ae0</code><br>
+  <strong>Base:</strong> main<br>
+  <strong>Reviewed:</strong> 2026-06-12T10:42:07Z
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+  <p>Straightforward tier promotion for a single Hypershift job pattern. The rule is correctly ordered, the snapshot is updated consistently, and a test case validates the change. No logic changes, no risk.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Promotes the Hypershift Azure v2 self-managed job (<code>*-e2e-azure-v2-self-managed</code>) from <code>candidate</code> tier to <code>standard</code> tier, meaning it will now contribute to blocking release signal.</li>
+  <li>Adds the new pattern rule in <code>ocp.go</code> before the catch-all Hypershift <code>candidate</code> rule so it takes precedence.</li>
+  <li>Updates <code>snapshot.yaml</code> for both 4.23 and 5.0 versions of the job.</li>
+  <li>Adds a test case covering the full variant map for this job name.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>No findings. The change is minimal, correct, and well-tested.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>Rule ordering:</strong> The new <code>standard</code> rule is placed before the Hypershift catch-all <code>candidate</code> rule, matching the pattern of the two existing standard-tier Hypershift jobs.</li>
+  <li><strong>Pattern correctness:</strong> The two-element prefix/suffix pattern matches both 4.23 and 5.0 job names in the snapshot.</li>
+  <li><strong>Test coverage:</strong> New test validates all variant values including <code>VariantJobTier: "standard"</code>. Values are consistent with existing Hypershift Azure test cases.</li>
+  <li><strong>Snapshot consistency:</strong> Both release versions updated from <code>candidate</code> to <code>standard</code>.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<p>None.</p>
+
+</body>
+</html>
