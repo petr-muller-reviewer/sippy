@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3614</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; border-bottom: 2px solid #0969da; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; background: #f0f3f6; padding: .15em .35em; border-radius: 3px; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .header-meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .header-meta dt { font-weight: 600; display: inline; }
+  .header-meta dd { display: inline; margin: 0 1.2rem 0 0; }
+  .verdict { padding: .8rem 1rem; border-radius: 6px; margin: 1rem 0; }
+  .verdict.approve { background: #dafbe1; border-left: 4px solid #1a7f37; }
+  .verdict.request-changes { background: #ffebe9; border-left: 4px solid #cf222e; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; padding: .15em .5em; border-radius: 3px; margin-right: .4rem; vertical-align: middle; }
+  .severity.nit { background: #ddf4ff; color: #0550ae; }
+  .severity.blocking { background: #ffebe9; color: #cf222e; }
+  .severity.should-fix { background: #fff8c5; color: #6f3800; }
+  .severity.question { background: #f0f3f6; color: #424a53; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: .3rem; }
+  .checked li { color: #1a7f37; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3614</h1>
+
+<div class="header-meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3614">openshift/sippy#3614</a></dd>
+    <dt>Title:</dt><dd>Optimize test report matview refresh with pre-aggregation CTE</dd>
+    <dt>Author:</dt><dd>mstaeble</dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Head SHA:</dt><dd><code>332faf57ca67c2749a45948b16f974efa37ee185</code></dd>
+    <dt>Reviewed:</dt><dd>2026-06-12T10:45:50Z</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict approve">
+  <strong>Approve.</strong>
+</div>
+<p>
+  Well-executed query optimization with thorough correctness verification. The pre-aggregation math is sound,
+  the <code>::bigint</code> casts and upper-bound filter address review feedback correctly, the ORDER BY
+  removal is correct, and benchmarks show a 4-6x improvement on production. No correctness or safety concerns.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>pre_agg</code> CTE that groups <code>prow_job_run_tests</code> by <code>(prow_job_id, test_id, suite_id, prow_job_run_release)</code> before joining dimension tables, collapsing ~60M rows to ~10M.</li>
+  <li>Replaces <code>COUNT(*)</code> in the outer query with <code>SUM(pre_agg.*)::bigint</code> to aggregate the pre-computed counts while preserving the <code>bigint</code> column type contract.</li>
+  <li>Adds an upper-bound timestamp filter (<code>&lt;= |||END|||</code>) in the CTE <code>WHERE</code> clause to enable future partition pruning.</li>
+  <li>Removes the <code>ORDER BY</code> from the matview definition (physical order guarantees nothing to readers, and it forced a sort on every refresh).</li>
+  <li>Reduces matview refresh time from 25-35 min to ~6 min on production (1B rows in <code>prow_job_run_tests</code>).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity nit">nit</span> BETWEEN boundary overlap counts rows at BOUNDARY in both windows</h3>
+<p><code>pkg/db/views.go:244-251</code></p>
+<p>
+  <code>BETWEEN |||START||| AND |||BOUNDARY|||</code> and <code>BETWEEN |||BOUNDARY||| AND |||END|||</code>
+  both include the boundary timestamp, so rows at exactly that instant are counted in <strong>both</strong> windows.
+  This is pre-existing behavior from the original query, not introduced by this PR, but worth noting for a future fix.
+</p>
+<pre><code>COUNT(*) FILTER (WHERE status = 1  AND prow_job_run_timestamp BETWEEN |||START||| AND |||BOUNDARY|||) AS previous_successes,
+...
+COUNT(*) FILTER (WHERE status = 1  AND prow_job_run_timestamp BETWEEN |||BOUNDARY||| AND |||END|||) AS current_successes,</code></pre>
+
+<h3><span class="severity nit">nit</span> Mixed predicate style in pre_agg CTE</h3>
+<p><code>pkg/db/views.go:255</code></p>
+<p>
+  The <code>WHERE</code> clause uses <code>&gt;= ... AND ... &lt;=</code> while the <code>FILTER</code> clauses
+  use <code>BETWEEN</code>. Semantically identical but slightly inconsistent within the same CTE. Cosmetic only.
+</p>
+<pre><code>prow_job_run_timestamp >= |||START||| AND prow_job_run_timestamp <= |||END|||</code></pre>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>Pre-aggregation math: grouping by all outer join keys, so <code>SUM(COUNT(*))</code> == <code>COUNT(*)</code> over the full set</li>
+  <li><code>::bigint</code> casts are necessary because <code>SUM(bigint)</code> returns <code>numeric</code> in PostgreSQL</li>
+  <li>Upper-bound <code>&lt;= |||END|||</code> filter is a no-op today but correctly enables future partition pruning</li>
+  <li>ORDER BY removal: matview physical order guarantees nothing to readers</li>
+  <li><code>test_ownerships</code> fan-out behavior is identical to original (same LEFT JOIN, same GROUP BY columns)</li>
+  <li>NULL <code>suite_id</code> handling: PostgreSQL GROUP BY groups all NULLs together, matching original behavior</li>
+  <li>Both 7d and 2d matviews use the same template, so both benefit</li>
+  <li>EXCEPT-based correctness verification was done in both directions on two datasets</li>
+  <li>CodeRabbit comment about benchmark scripts is moot: scripts were removed from the repo</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The <code>BETWEEN</code> boundary overlap (rows at exactly <code>|||BOUNDARY|||</code> counted in both windows) is pre-existing. Is this intentional, or something to track as a separate fix?</li>
+</ul>
+
+</body>
+</html>
