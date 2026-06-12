@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3611</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.2rem 0 0; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.6rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; }
+  .sev-should-fix { background: #fff8c5; color: #6a5a00; }
+  .sev-nit { background: #ddf4ff; color: #0550ae; }
+  .sev-question { background: #f0e6ff; color: #5e3a9e; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3611</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3611">openshift/sippy#3611</a></dd>
+    <dt>Title:</dt><dd>TRT-1989: standardize lookback and partition begin grace</dd>
+    <dt>Author:</dt><dd>neisw</dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Head SHA:</dt><dd><code>49dd8c52414fe321daa4985dbcd8cc5fd6358bb4</code></dd>
+    <dt>Reviewed:</dt><dd>2026-06-12T10:42:28Z</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve</strong> with minor suggestions.
+</div>
+<p>
+  Clean, low-risk change that fixes a real partition-gap bug for new databases and removes an inconsistency in default lookback windows. One stale doc comment should be fixed; the rest are optional improvements.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces <code>DefaultLookbackDays = 14</code> constant and replaces three separate hardcoded fallback values (7 days in <code>ensurePartitions</code>, <code>14 * 24 * time.Hour</code> in the other two) with it.</li>
+  <li>Extracts a <code>resolveLoadSince()</code> helper method that returns <code>pl.loadSince</code> or falls back to <code>DefaultLookbackDays</code> ago; used by <code>ensurePartitions</code>.</li>
+  <li>Adds a 1-day grace period to the partition start date in <code>ensurePartitions</code>, because BQ queries by <code>modified_time</code> can return rows whose <code>job_run_start_time</code> is a day earlier.</li>
+  <li>Threads <code>pl.loadSince</code> into <code>getTestAnalysisByJobFromToDates</code> so that the new-DB bulk import respects the configured load-since rather than always defaulting.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-should-fix">should fix</span> Stale doc comment says "one week" instead of 14 days</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:197</code></p>
+<pre><code>//   - pl.loadSince if available, otherwise looks back one week</code></pre>
+<p>The behavior is now 14 days via <code>resolveLoadSince()</code>. This comment will mislead future readers.</p>
+
+<h3><span class="severity sev-nit">nit</span> GitHub permalink in comment will rot</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:208</code></p>
+<pre><code>// https://github.com/openshift/sippy/blob/main/pkg/dataloader/prowloader/prow.go#L473 bq imports based on modified time...</code></pre>
+<p>Line numbers in <code>blob/main</code> URLs drift as the file changes. A reference to the function name (<code>fetchProwJobsFromOpenShiftBigQuery</code>) would be more durable.</p>
+
+<h3><span class="severity sev-nit">nit</span> Duplicated loadSince-or-default pattern</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:364-370</code>, <code>pkg/dataloader/prowloader/bigqueryjobs.go:22-30</code></p>
+<p>
+  <code>resolveLoadSince()</code> centralizes the pattern for <code>ensurePartitions</code>, but <code>getTestAnalysisByJobFromToDates</code> and <code>fetchProwJobsFromOpenShiftBigQuery</code> still inline the same <code>if loadSince != nil</code> logic. Three copies of the same default. Not a bug &mdash; all use <code>DefaultLookbackDays</code> now &mdash; but a future change to the default would need to touch all three sites.
+</p>
+
+<h3><span class="severity sev-question">question</span> No test for <code>loadSince != nil</code> in <code>getTestAnalysisByJobFromToDates</code></h3>
+<p><code>pkg/dataloader/prowloader/prow_test.go:176</code></p>
+<p>
+  All existing test cases pass <code>nil</code> for the new <code>loadSince</code> parameter. The <code>loadSince != nil</code> branch in the new-DB path (<code>lastDailySummary.IsZero()</code>) is untested. A test case with a non-nil <code>loadSince</code> and zero <code>lastDailySummary</code> would exercise the new code path.
+</p>
+
+<h2>Things I checked and found fine</h2>
+<ul>
+  <li><code>DefaultLookbackDays</code> is used consistently across all three fallback sites.</li>
+  <li>The <code>-1</code> day grace on partition start is purely additive &mdash; more partitions, never fewer &mdash; so no risk of breaking existing databases.</li>
+  <li><code>resolveLoadSince()</code> correctly replicates the prior inline logic.</li>
+  <li>Test signature change (added <code>nil</code> third arg) preserves existing test semantics.</li>
+  <li>No exported API changes; no behavioral change for non-new databases.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Would it make sense to refactor <code>getTestAnalysisByJobFromToDates</code> to accept a resolved <code>time.Time</code> (from <code>resolveLoadSince()</code>) instead of <code>*time.Time</code>, eliminating one copy of the pattern?</li>
+  <li>Should the partition grace also apply to the BQ query time range in <code>fetchProwJobsFromOpenShiftBigQuery</code>, or is the 12-hour job-runtime adjustment (line 36) sufficient there?</li>
+</ul>
+
+</body>
+</html>
