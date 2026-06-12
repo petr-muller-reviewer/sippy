@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3610</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.5rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .header-meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+  .header-meta p { margin: 0.2rem 0; }
+  .verdict { background: #dafbe1; border: 1px solid #a7f3d0; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+  .verdict.approve { background: #dafbe1; border-color: #a7f3d0; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; text-transform: uppercase; margin-right: 0.4rem; }
+  .severity.question { background: #ddf4ff; color: #0969da; }
+  .severity.nit { background: #fff8c5; color: #9a6700; }
+  .finding { margin-bottom: 1.2rem; padding-left: 0.8rem; border-left: 3px solid #d0d7de; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3610</h1>
+
+<div class="header-meta">
+  <p><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3610">openshift/sippy#3610</a></p>
+  <p><strong>Title:</strong> add feature docs for symptoms</p>
+  <p><strong>Author:</strong> sosiouxme (Luke Meyer)</p>
+  <p><strong>Base:</strong> main</p>
+  <p><strong>Head SHA:</strong> <code>3c9e831e63d858f7ba40f43f4b5860f294066a21</code></p>
+  <p><strong>Reviewed:</strong> 2026-06-12T15:14:20Z</p>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict approve">
+  <p><strong>Approve.</strong></p>
+  <p>Documentation-only PR with no functional code changes. The feature doc is thorough, well-structured, and every code path and symbol reference it makes has been verified against the current codebase. The accompanying CodeRabbit and APM instruction changes create a reasonable maintenance feedback loop to keep the doc accurate as the feature evolves. One open question about GEMINI.md freshness.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a comprehensive feature doc (<code>docs/features/job-analysis-symptoms.md</code>) covering the symptoms/labels system end-to-end: purpose, core concepts, data flow from definition through cloud-function detection to UI display, key code locations, API summary, and storage map.</li>
+  <li>Establishes a <code>docs/features/</code> convention for feature documentation, with an APM instruction telling contributors to update feature docs alongside code changes.</li>
+  <li>Adds CodeRabbit path-specific review instructions for symptom-related code paths, prompting reviewers to suggest docs updates when those files change.</li>
+  <li>Adds a CodeRabbit "Feature Documentation" pre-merge check (warning mode) to nudge contributors toward keeping feature docs current.</li>
+  <li>Regenerates <code>CLAUDE.md</code> and <code>AGENTS.md</code> to pick up the new docs instruction.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity question">Question</span> GEMINI.md not regenerated</h3>
+<div class="finding">
+  <p><code>repo root</code></p>
+  <p>The APM source (<code>.apm/instructions/docs.instructions.md</code>) changed and both <code>CLAUDE.md</code> and <code>AGENTS.md</code> were regenerated, but <code>GEMINI.md</code> is absent from the diff. If it derives from the same APM source, <code>make verify-apm</code> may fail in CI.</p>
+</div>
+
+<h3><span class="severity nit">Nit</span> CodeRabbit brace-expansion glob may not match</h3>
+<div class="finding">
+  <p><code>.coderabbit.yaml:59</code></p>
+  <p>The path <code>pkg/**/jobrun{scan,annotator}/**</code> uses shell-style brace expansion. CodeRabbit uses minimatch/micromatch-style globs which do support braces, so this should work &mdash; but if it silently doesn't, the two paths would need separate entries.</p>
+  <pre><code>- path: "pkg/**/jobrun{scan,annotator}/**"</code></pre>
+</div>
+
+<h3><span class="severity nit">Nit</span> Parenthetical about JobRunAnnotator may go stale</h3>
+<div class="finding">
+  <p><code>docs/features/job-analysis-symptoms.md:128</code></p>
+  <p>The doc says <code>JobRunAnnotator</code> &ldquo;can add labels but doesn't (yet) know about symptoms.&rdquo; Accurate today, but the &ldquo;(yet)&rdquo; qualifier implies planned work that may or may not happen, making this line a staleness magnet. Consider stating the current state without the future-looking qualifier.</p>
+  <pre><code>| `pkg/componentreadiness/jobrunannotator/jobrunannotator.go` | `JobRunAnnotator` - the `annotate-job-runs` tool which can add labels but doesn't (yet) know about symptoms. |</code></pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>All 15 code paths in the feature doc exist at the claimed locations.</li>
+  <li>All named symbols (<code>GatherLabelsFromBQ</code>, <code>SyncTriageSymptoms</code>, <code>JobRunAnnotator</code>, <code>WriteHTMLSummaryToBucket</code>, <code>ContentMatcher</code>) verified at documented files.</li>
+  <li>Generated <code>CLAUDE.md</code> and <code>AGENTS.md</code> diffs are build-ID + propagated instruction only, consistent with the APM source change.</li>
+  <li>Feature doc data flow description (definition &rarr; cloud function &rarr; BQ &rarr; prow loader &rarr; postgres &rarr; UI) matches actual code structure.</li>
+  <li>CodeRabbit &ldquo;Feature Documentation&rdquo; pre-merge check uses <code>warning</code> mode (not <code>error</code>), which is appropriate for encouraging rather than blocking.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Was <code>GEMINI.md</code> intentionally left out, or does it need regeneration from the same APM source?</li>
+</ul>
+
+</body>
+</html>
