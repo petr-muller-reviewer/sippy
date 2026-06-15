@@ -5,5 +5,6 @@ paths:
 
 * When adding or updating APIs, **use HATEOAS** in responses to support discoverability and consistent client interaction.
 * Follow idiomatic Go practices.
+* Use `k8s.io/apimachinery/pkg/util/sets` (e.g. `sets.NewString()`) to deduplicate or collect unique strings. Do not use `map[string]bool` as a hand-rolled set.
 * After making changes, always run `gofmt -w` on modified files to ensure proper formatting.
 * When modifying any data provider (BigQuery or PostgreSQL), ensure **parity between both implementations**. Changes to query logic, filtering, or returned data in one provider must be reflected in the other.
