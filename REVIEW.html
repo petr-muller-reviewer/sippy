@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3617</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    background: #fff;
+  }
+  h1 { font-size: 1.5rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.5rem 0 0.3rem; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.8rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; }
+  .sev-nit { background: #ddf4ff; color: #0969da; }
+  .sev-question { background: #fff8c5; color: #9a6700; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3617</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3617">openshift/sippy#3617</a></dd>
+    <dt>Title:</dt><dd>Reclassify spot-check jobs from 'rare' to 'spotcheck-30d' tier</dd>
+    <dt>Head SHA:</dt><dd><code>dd2dd3172e071f6b1ce295baa93d95d92b4c88f5</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-06-15T10:04:25Z</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+</div>
+<p>
+  Well-structured preparatory PR that introduces explicit spot-check classification with component/capability metadata, replacing the generic "rare" tier. The separation of classification from tier assignment is clean, validation is placed at both code paths, and the snapshot updates are mechanically consistent across all releases and platforms. Only minor nits below.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces two new variant constants (<code>SpotCheckComponent</code>, <code>SpotCheckCapability</code>) that tag spot-check jobs with their Component Readiness component and capability.</li>
+  <li>Adds a new setter <code>setSpotCheckClassification</code> that matches cpu-partitioning and etcd-scaling jobs by name and assigns the new variants.</li>
+  <li>Modifies <code>setJobTier</code> to auto-assign <code>spotcheck-30d</code> tier when a job has spot-check classification, removing the old <code>rare</code> pattern entries.</li>
+  <li>Adds <code>validateSpotCheckVariants</code> as a safety net: any job with a <code>spotcheck-*</code> tier must have both component and capability defined. Validation runs in both DB-driven and snapshot-driven code paths.</li>
+  <li>Updates ~50 snapshot entries consistently from <code>rare</code> to <code>spotcheck-30d</code> with appropriate component/capability values.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-nit">Nit</span> Stale comment on VariantJobTier constant</h3>
+<p><code>pkg/variantregistry/ocp.go:465</code></p>
+<pre><code>VariantJobTier             = "JobTier"      // specifies rare, blocking, informing, standard jobs</code></pre>
+<p>
+  The inline comment still lists <code>rare</code> as a tier. The <code>setJobTier</code> godoc was correctly updated to list <code>spotcheck</code> instead, but this comment was missed.
+</p>
+
+<h3><span class="severity sev-nit">Nit</span> No direct unit test for validateSpotCheckVariants error path</h3>
+<p><code>pkg/variantregistry/ocp.go:279-286</code></p>
+<pre><code>func validateSpotCheckVariants(jobName string, variants map[string]string) error {
+	if strings.HasPrefix(variants[VariantJobTier], "spotcheck-") {
+		if variants[VariantSpotCheckComponent] == "" || variants[VariantSpotCheckCapability] == "" {
+			return fmt.Errorf(...)
+		}
+	}
+	return nil
+}</code></pre>
+<p>
+  The happy path is tested indirectly via <code>TestVariantSyncer</code>, but there is no test that verifies the error is returned when a job has <code>spotcheck-30d</code> tier but is missing one or both of the spot-check variants. Since this validation is a safety net for future classification errors, a small table-driven test covering the error path would add confidence.
+</p>
+
+<h3><span class="severity sev-nit">Nit</span> spotCheckPatterns substrings slice always has one element</h3>
+<p><code>pkg/variantregistry/ocp.go:767-774</code></p>
+<pre><code>spotCheckPatterns := []struct {
+	substrings []string
+	component  string
+	capability string
+}{
+	{[]string{"-cpu-partitioning"}, "Node / Kubelet", "CPU Partitioning"},
+	{[]string{"-etcd-scaling"}, "Etcd", "Scaling"},
+}</code></pre>
+<p>
+  Each entry uses <code>substrings []string</code> but only ever contains a single element. This mirrors the existing <code>jobTierPatterns</code> convention, so it's fine for consistency. Could be simplified to a single string if multi-match is confirmed unnecessary.
+</p>
+
+<h2>Things I checked and found fine</h2>
+<ul>
+  <li>All snapshot.yaml entries consistently updated: <code>rare</code> &rarr; <code>spotcheck-30d</code>, correct component/capability per job type across all releases (4.12&ndash;5.0) and all platforms including shiftstack OpenStack jobs.</li>
+  <li><code>adjustJobTierBasedOnView</code> correctly handles <code>spotcheck-30d</code>: the tier is not in any view's include list, so the <code>!tierIncluded</code> early return preserves it without downgrade. The existing test case was updated to verify this.</li>
+  <li><code>setSpotCheckClassification</code> is placed before <code>setJobTier</code> in the setter chain (line 507 vs 508), so the component variant is guaranteed to be set before <code>setJobTier</code> checks for it.</li>
+  <li>No remaining <code>"rare"</code> references in config YAML/JSON files.</li>
+  <li>Validation is added to both code paths: the DB-driven <code>Identify()</code> in <code>ocp.go</code> and the config-driven <code>Identify()</code> in <code>snapshot.go</code>.</li>
+  <li>View configs in <code>config/views.yaml</code> intentionally do not include <code>spotcheck-30d</code> &mdash; views opt in, matching the PR description and the <code>setJobTier</code> godoc.</li>
+  <li>Validation errors are sorted for deterministic output (latest commit).</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is there a plan to remove the <code>rare</code> tier entirely? The <code>setJobTier</code> godoc no longer lists it, but <code>ocp.go:882</code> still references it in a comment (<code>// may want to go to rare at some point</code>). Should that comment be updated too, or is <code>rare</code> still a valid tier for future use?</li>
+</ul>
+
+</body>
+</html>
