@@ -546,8 +546,8 @@ func ensureTriageSymptomCascade(db *gorm.DB) error {
 // infrastructure that depends on tables created by AutoMigrate:
 //   - Attaches the trigger (function created by migration 000003)
 //   - Backfills variant_combination_id on existing prow_jobs rows
-//   - Adds variant_combination_id to test_daily_summaries and truncates
-//     so the next refresh populates it
+//   - Truncates test_daily_summaries if any rows lack variant_combination_id
+//     so the next refresh repopulates with it set
 func ensureVariantCombinationTrigger(db *gorm.DB) error {
 	return db.Exec(`
 		DO $$
