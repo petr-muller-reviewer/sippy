@@ -39,14 +39,16 @@
   .meta dd { display: inline; margin: 0; }
   .meta dd::after { content: ""; display: block; margin-bottom: 0.2em; }
   .verdict { padding: 0.8em 1em; border-radius: 6px; margin-bottom: 1.5em; }
-  .verdict-request-changes { background: #fff1e5; border-left: 4px solid #d1242f; }
+  .verdict-approve { background: #dafbe1; border-left: 4px solid #1a7f37; }
   .severity { display: inline-block; font-size: 0.78em; font-weight: 700; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
   .sev-blocking { background: #ffebe9; color: #cf222e; }
   .sev-should-fix { background: #fff8c5; color: #9a6700; }
   .sev-nit { background: #ddf4ff; color: #0969da; }
   .sev-question { background: #f6f8fa; color: #656d76; }
+  .sev-resolved { background: #dafbe1; color: #1a7f37; }
   .finding { margin-bottom: 1.5em; }
   .finding-where { color: #656d76; font-size: 0.9em; margin-bottom: 0.3em; }
+  .update-banner { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 0.8em 1em; margin-bottom: 1.5em; font-size: 0.92em; }
   ul { padding-left: 1.4em; }
   li { margin-bottom: 0.3em; }
   a { color: #0969da; text-decoration: none; }
@@ -60,17 +62,22 @@
 <div class="meta">
   <dl>
     <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3659">openshift/sippy#3659</a></dd>
-    <dt>Title</dt><dd>[WIP] Add daily summary table to accelerate matview refreshes</dd>
+    <dt>Title</dt><dd>add daily summary table to accelerate matview refreshes</dd>
     <dt>Author</dt><dd>mstaeble</dd>
     <dt>Base</dt><dd>main</dd>
-    <dt>Head SHA</dt><dd><code>50ff28f54727a131cdc9c9a03e7b1a5dc3231223</code></dd>
-    <dt>Reviewed at</dt><dd>2026-06-22T12:45:47Z</dd>
+    <dt>Head SHA</dt><dd><code>9babd2dc1829c21a5dfc53912e0ca35440711db3</code></dd>
+    <dt>Reviewed at</dt><dd>2026-06-23T19:59:50Z</dd>
   </dl>
 </div>
 
-<div class="verdict verdict-request-changes">
-  <strong>Verdict: Request changes</strong>
-  <p>Well-engineered performance optimization with solid testing and clear documentation of trade-offs. One compilation break blocks merge. The rest are minor observations and questions for the author.</p>
+<div class="update-banner">
+  <strong>Refreshed</strong> from <code>50ff28f5</code> &rarr; <code>9babd2dc</code>.
+  Rebased on main (#3658 merged). Fix commit <code>9babd2dc1</code> addresses error handling bugs raised by CodeRabbit and not-stbenjam. See "Resolved" section and "Since previous review" below.
+</div>
+
+<div class="verdict verdict-approve">
+  <strong>Verdict: Approve</strong>
+  <p>The original blocking finding (compilation break) is fixed. Three error-handling bugs raised by not-stbenjam are addressed by the fix commit. The core optimization is solid and the code quality improved significantly since the initial review. Only minor nits and low-risk questions remain.</p>
 </div>
 
 <h2>What this PR does</h2>
@@ -82,25 +89,21 @@
   <li>Quantizes matview time boundaries from exact timestamps to calendar-day (midnight UTC) boundaries, trading ~1 day of boundary precision for 2-3x faster refreshes.</li>
 </ul>
 
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>Parallel worker error handling fixed: <code>return</code> changed to <code>continue</code> so workers keep consuming after per-release failure. Errors collected via channel and joined.</li>
+  <li><code>RefreshData</code> now returns early on daily summary failure, preventing matview rebuild on empty/stale data.</li>
+  <li>Truncate moved after <code>dateRange</code>/<code>Releases</code> queries; <code>skipConflictDetection</code> skips upsert overhead on rebuild/empty table.</li>
+  <li>Release aggregation parallelized across 4 workers via <code>sync.WaitGroup.Go()</code> (Go 1.25).</li>
+  <li><code>COALESCE(SUM(...), 0)</code> wraps all matview SUM() FILTER expressions. CASCADE added to down migration. Start &gt; end date validation added.</li>
+  <li>Tests: thread-safe fakeStore, <code>time.Date</code> replaces <code>tp()</code> helper, new parallel and matview-creation-order tests.</li>
+</ul>
+
 <h2>Findings</h2>
-
-<h3><span class="severity sev-blocking">Blocking</span> Compilation break: missed RefreshData call site</h3>
-<div class="finding">
-  <div class="finding-where"><code>pkg/flags/postgres_benchmarking_test.go:1233</code></div>
-  <p>Still uses the old 3-argument signature. The function now requires a 4th <code>dailysummary.Options</code> argument. This will fail <code>go build ./...</code>.</p>
-  <pre><code>sippyserver.RefreshData(dbc, nil, false)</code></pre>
-</div>
-
-<h3><span class="severity sev-nit">Nit</span> Time-dependent hardcoded date in test</h3>
-<div class="finding">
-  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary_test.go:55</code></div>
-  <p><code>TestRefresh_Incremental</code> uses <code>tp("2026-06-17")</code> which works only because the date is already past. Compare with <code>TestRefresh_IncrementalCapsAtYesterday</code> which correctly uses <code>time.Now().AddDate(0, 0, 1)</code>. Not a practical problem, just inconsistent style.</p>
-  <pre><code>store := &amp;fakeStore{maxSummary: tp("2026-06-17")}</code></pre>
-</div>
 
 <h3><span class="severity sev-nit">Nit</span> No test for EndOverride-only path</h3>
 <div class="finding">
-  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:120-124</code></div>
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:171-175</code></div>
   <p>The <code>dateRange</code> function handles EndOverride-only (start auto-resolved, end overridden) but no test covers this path. Code is straightforward, so low risk.</p>
   <pre><code>endDate := now
 if opts.EndOverride != nil {
@@ -114,31 +117,74 @@ if opts.EndOverride != nil {
   <p>If rows are deleted from <code>prow_job_run_tests</code>, orphaned summary rows persist with old counts. The upsert <code>INSERT...SELECT</code> only produces rows for data that currently exists, so deleted-source rows are never corrected. Append-only ingestion makes this unlikely, and <code>--rebuild-daily-summaries</code> covers the exceptional case. Worth a sentence in docs for operators?</p>
 </div>
 
-<h3><span class="severity sev-question">Question</span> CASCADE commit overlap with #3658</h3>
+<h3><span class="severity sev-question">Question</span> Residual truncate-then-fail window (not-stbenjam Bug 2)</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:100-107</code></div>
+  <p>When <code>Rebuild=true</code>, truncate still commits immediately outside any transaction. If <code>aggregateReleases</code> subsequently fails, the table is empty. The sting is largely removed: <code>RefreshData</code> now returns early (matviews aren't rebuilt from empty data), and the next incremental refresh auto-recovers (empty table triggers default lookback). A transactional truncate+repopulate would eliminate the window entirely, but practical risk is low given current mitigations.</p>
+  <pre><code>if skipConflictDetection {
+    log.Info("rebuild requested, truncating test_daily_summaries")
+    if err := store.Truncate(); err != nil {
+        return fmt.Errorf("truncating table: %w", err)
+    }
+}</code></pre>
+</div>
+
+<h2>Resolved</h2>
+
+<h3><span class="severity sev-resolved">Resolved</span> Compilation break: missed RefreshData call site</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/flags/postgres_benchmarking_test.go:1233</code></div>
+  <p>Fixed by commit <code>9babd2dc1</code> &mdash; added <code>dailysummary.Options{}</code> as 4th argument.</p>
+</div>
+
+<h3><span class="severity sev-resolved">Resolved</span> Time-dependent hardcoded date in test</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary_test.go</code></div>
+  <p>Fixed by commit <code>9babd2dc1</code> &mdash; <code>tp()</code> helper removed entirely, all test dates use <code>time.Date()</code>.</p>
+</div>
+
+<h3><span class="severity sev-resolved">Resolved</span> CASCADE commit overlap with #3658</h3>
 <div class="finding">
   <div class="finding-where"><code>pkg/db/views.go:156</code></div>
-  <p>This PR carries the CASCADE change that is also PR #3658. If #3658 merges first and this is rebased, the change becomes a no-op in the diff. Is the plan to squash, or will #3658 be dropped in favor of this PR carrying it?</p>
+  <p>#3658 merged (commit <code>c32851453</code>). CASCADE change is now part of main; this PR's rebase carries it naturally.</p>
+</div>
+
+<h3><span class="severity sev-resolved">Resolved</span> not-stbenjam Bug 1: Worker goroutine exits on first error</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:139</code></div>
+  <p>Fixed by commit <code>9babd2dc1</code> &mdash; <code>return</code> changed to <code>continue</code>, workers keep consuming from work channel after per-release failure.</p>
+</div>
+
+<h3><span class="severity sev-resolved">Resolved</span> not-stbenjam Bug 3: RefreshData swallows daily summary error</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/sippyserver/server.go:393-395</code></div>
+  <p>Fixed by commit <code>9babd2dc1</code> &mdash; error now causes early <code>return</code>, matview refresh is skipped. Log message updated to "skipping matview refresh to avoid stale data".</p>
 </div>
 
 <h2>Things I checked and was fine with</h2>
 <ul>
-  <li><strong><code>suite_id=0</code> for NULL suites.</strong> <code>COALESCE(suite_id, 0)</code> in upsert + LEFT JOINs to <code>suites</code> and <code>test_ownerships</code> behave identically for <code>id=0</code> as for NULL (no match, NULL result). Semantics preserved.</li>
-  <li><strong>Date boundary precision.</strong> DATE-to-TIMESTAMP comparisons can exclude up to ~1 day at window start. Documented in PR description, acceptable for trend analysis. Midnight-aligned pinned times avoid it entirely.</li>
+  <li><strong><code>suite_id=0</code> for NULL suites.</strong> <code>COALESCE(suite_id, 0)</code> in upsert + LEFT JOINs to <code>suites</code> and <code>test_ownerships</code> behave identically for <code>id=0</code> as for NULL. Semantics preserved.</li>
+  <li><strong>Date boundary precision.</strong> DATE-to-TIMESTAMP comparisons can exclude up to ~1 day at window start. Documented in PR description, acceptable for trend analysis.</li>
   <li><strong><code>runs</code> column.</strong> Counts all rows via <code>COUNT(*)</code> including non-success/failure/flake statuses. Consistent with original matview behavior.</li>
-  <li><strong><code>valueColumns</code> slice.</strong> Generates both SET and WHERE clauses in upsert, preventing column drift between them.</li>
-  <li><strong>Per-release aggregation loop.</strong> Avoids 51s planner overhead on 3553 sub-partitions. Well-motivated by benchmarks.</li>
-  <li><strong>Non-fatal daily summary failure.</strong> <code>server.go:393-394</code> logs error and continues matview refresh with stale data.</li>
-  <li><strong>Migration idempotency.</strong> <code>IF NOT EXISTS</code> on both table and indexes. Down migration drops cleanly.</li>
-  <li><strong>All <code>RefreshData</code> call sites updated</strong> (load.go, refresh.go, seed_data.go, updatesuites.go) except the benchmarking test.</li>
-  <li><strong>No data pruning.</strong> Summaries accumulate indefinitely. At a few hundred rows per release per day, stays small for years. <code>summary_date</code> index keeps 14-day filter selective.</li>
-  <li><strong><code>TestDailySummary</code> model</strong> in <code>prow.go</code> matches migration schema.</li>
-  <li><strong>Test coverage.</strong> 11 tests cover incremental, caps-at-yesterday, empty-table lookback, rebuild, date overrides, all error paths, and no-releases edge case.</li>
+  <li><strong><code>valueColumns</code> slice.</strong> Generates both INSERT and ON CONFLICT clauses, preventing column drift.</li>
+  <li><strong>Per-release aggregation.</strong> Avoids 51s planner overhead. Now parallelized across 4 workers.</li>
+  <li><strong>Non-fatal daily summary failure.</strong> <code>server.go</code> now returns early, preventing matview rebuild on empty/stale data.</li>
+  <li><strong>Migration idempotency.</strong> <code>IF NOT EXISTS</code> on both table and indexes. Down migration drops with CASCADE.</li>
+  <li><strong>All <code>RefreshData</code> call sites</strong> updated with 4-arg signature.</li>
+  <li><strong><code>sync.WaitGroup.Go()</code></strong> is valid &mdash; go.mod specifies <code>go 1.25.0</code>.</li>
+  <li><strong><code>errs</code> channel capacity <code>len(releases)</code></strong> &mdash; can't block since each worker sends at most one error per release.</li>
+  <li><strong><code>skipConflictDetection</code></strong> correctly skips ON CONFLICT for rebuild (post-truncate) and empty table (no conflicts possible).</li>
+  <li><strong>COALESCE(SUM(...), 0)</strong> prevents NULL propagation through matview for window-boundary tests.</li>
+  <li><strong>Start &gt; end validation</strong> in <code>dailySummaryOptions()</code> rejects reversed override ranges.</li>
+  <li><strong>fakeStore</strong> in tests is thread-safe (mutex on calls slice) for parallel worker testing.</li>
+  <li><strong><code>TestRefresh_ParallelProcessesAllReleases</code></strong> verifies all releases processed regardless of worker count.</li>
+  <li><strong><code>TestMatviewSourcesCreatedBeforeDependents</code></strong> validates matview creation order in <code>PostgresMatViews</code> slice.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
   <li>Should stale-summary-after-deletion be documented somewhere for operators, or is <code>--rebuild-daily-summaries</code> sufficient as a catch-all?</li>
-  <li>What is the merge plan for the CASCADE change relative to #3658?</li>
+  <li>Is the residual truncate-then-fail window acceptable given the current mitigations (fatal error + auto-recovery), or should a transactional approach be considered for a follow-up?</li>
 </ul>
 
 </body>
