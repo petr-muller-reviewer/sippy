@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3643</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65;
+    color: #1a1a1a;
+    background: #f8f9fa;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 2px solid #dee2e6; padding-bottom: 0.25rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.25rem; margin-bottom: 0.4rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  a { color: #0366d6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: #e9ecef;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85em;
+    background: #f1f3f5;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    margin: 0.5rem 0 1rem 0;
+    line-height: 1.5;
+  }
+  .meta {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.92rem;
+    color: #495057;
+  }
+  .meta strong { color: #1a1a1a; }
+  .verdict-box {
+    border-left: 4px solid #fd7e14;
+    background: #fff8f0;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 4px 4px 0;
+  }
+  .verdict-box .label {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    color: #e65100;
+    letter-spacing: 0.03em;
+  }
+  .finding {
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .finding-title { font-weight: 600; margin-bottom: 0.3rem; }
+  .finding-loc { font-size: 0.88rem; color: #6c757d; margin-bottom: 0.5rem; }
+  .sev-should-fix { border-left: 4px solid #fd7e14; }
+  .sev-nit { border-left: 4px solid #6c757d; }
+  .sev-question { border-left: 4px solid #0366d6; }
+  .sev-blocking { border-left: 4px solid #dc3545; }
+  .sev-resolved { border-left: 4px solid #28a745; }
+  .tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.4em;
+    vertical-align: middle;
+    text-transform: uppercase;
+  }
+  .tag-should-fix { background: #fff3e0; color: #e65100; }
+  .tag-nit { background: #e9ecef; color: #495057; }
+  .tag-question { background: #e3f2fd; color: #0d47a1; }
+  .tag-blocking { background: #fde8e8; color: #c62828; }
+  .tag-resolved { background: #e8f5e9; color: #2e7d32; }
+  .checked-list li { margin-bottom: 0.3rem; }
+  .update-box {
+    background: #e8f5e9;
+    border: 1px solid #c8e6c9;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.92rem;
+  }
+  .update-box strong { color: #2e7d32; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: TRT-2695: retroactively re-evaluate symptoms (API)</h1>
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3643">openshift/sippy#3643</a><br>
+  <strong>Author:</strong> sosiouxme (Luke Meyer)<br>
+  <strong>Head SHA:</strong> <code>075eebdf4c73b21219fb72323d44d8b8a5d7370f</code><br>
+  <strong>Base:</strong> main<br>
+  <strong>Reviewed:</strong> 2026-06-23T20:22:55Z<br>
+  <strong>Stats:</strong> +2222 / -34 across 28 files<br>
+  <strong>Previous reviews:</strong> 2026-06-22T17:37:07Z at <code>f4d91701b</code>, 2026-06-23T11:48:10Z at <code>075eebdf4</code>
+</div>
+
+<div class="update-box">
+  <strong>Since previous review</strong> (5 commits, +85/-65 across 10 files):
+  <ul>
+    <li>Fixed <code>>=</code> to <code>=</code> in <code>queryNonSymptomLabels</code> date filter, matching <code>clearBQLabels</code>.</li>
+    <li><code>jobartifacts.Manager</code> now a field on <code>ReEvaluator</code>, injected via constructor, reuses server's <code>s.jobartifactsManager</code>.</li>
+    <li><code>mergeLabels</code> uses <code>sets.New[string](manualLabels...)</code> directly.</li>
+    <li>Migrated from <code>sets.NewString()</code> to <code>sets.New[string]()</code>, <code>.List()</code> to <code>.UnsortedList()</code>. Tests updated with order-independent comparison.</li>
+    <li>Structured logging throughout (<code>log.WithField</code>/<code>log.WithFields</code> instead of <code>Warnf</code>/<code>Debugf</code>).</li>
+  </ul>
+  <p>Author also commented on the sync API design: the intended architecture is for the frontend to run a
+    pool of workers making single-run requests, reporting progress as they return. Batching kept for
+    flexibility but expected primary use is one job run per request.</p>
+  <p><strong>Since second review</strong> (no code changes, discussion only):
+    mstaeble raised concerns about concurrent requests and frontend cancellation, arguing backend orchestration
+    is simpler for consistency. sosiouxme responded that operations are "idempotent-ish" (BQ streaming buffer
+    may cause harmless duplicates), and on cancellation: backend halts at context checkpoint, frontend can
+    retry. Both agree true consistency across 3 storage backends is impractical, and the orchestration
+    mechanism can iterate post-merge. mstaeble: "the main purpose of this PR seems to be to establish the
+    logic for doing the work not the mechanism by which the work is triggered or managed."</p>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <div class="label">Needs Discussion</div>
+  <p>
+    Three of the original should-fix findings have been addressed (date filter, Manager per run, mergeLabels).
+    Code quality is high, tests are solid, documentation is thorough. The remaining concern is the
+    cancellation hazard in the write path: BQ and GCS calls use the request context, so a client disconnect
+    can interrupt the delete-then-insert sequence mid-way, leaving inconsistent label state. The author's
+    frontend-worker-pool design (single-run requests) reduces the likelihood of hitting proxy timeouts but
+    does not eliminate the race. Worth discussing whether to use a detached context for the write path or
+    accept the risk for v1.
+  </p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code>POST /api/jobs/runs/reevaluate</code> endpoint that re-runs all symptom definitions against
+    specified job run artifacts, updating BigQuery, GCS, and PostgreSQL.</li>
+  <li>Uses delete-then-insert strategy for idempotency: clears existing symptom-originated labels, re-scans
+    artifacts, writes fresh results. Manually-applied labels (empty <code>symptom_id</code>) are preserved.</li>
+  <li>Extracts <code>BulkInsertJobRunLabels</code> from the annotator as a shared helper for BQ batch inserts.</li>
+  <li>Comprehensive documentation: detailed plan document, updated feature docs and API README, new BQ query labels.</li>
+  <li>APM/tooling updates: em-dash removal, <code>sets.NewString()</code> convention, no-mock testing guidance,
+    agentic command templates for multiple editors.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding sev-should-fix">
+  <div class="finding-title"><span class="tag tag-should-fix">should fix</span> Synchronous API with no cancellation safety</div>
+  <div class="finding-loc"><code>pkg/api/jobrunscan/reevaluate.go:123-127</code>, <code>pkg/sippyserver/job_run_scan.go:174-205</code></div>
+  <p>
+    The request <code>ctx</code> is passed to BQ and GCS calls in <code>clearAndWrite</code>
+    (which respect cancellation), but the artifact scanning in <code>getJobRunFiles</code>
+    (<code>query.go:134</code>) uses <code>context.Background()</code>. If a proxy kills the
+    connection, a race develops: the BQ DELETE in <code>clearBQLabels</code> may complete
+    (ctx still alive), then a subsequent BQ insert or GCS write fails with
+    <code>context.Canceled</code>, leaving the job run with cleared-but-not-rewritten labels.
+  </p>
+  <p>
+    <strong>Update:</strong> The author's comment (2026-06-23) describes the intended architecture:
+    the frontend will run a pool of workers making single-run requests, reporting progress as they
+    return. This reduces the timeout risk (single runs take seconds) but the cancellation hazard
+    remains: if <code>ctx</code> cancels between the BQ delete and insert within a single run,
+    the label state is inconsistent.
+  </p>
+  <p>
+    <strong>Discussion (2026-06-23):</strong> mstaeble raised concerns about concurrent requests and
+    frontend cancellation, arguing backend orchestration is simpler for consistency. sosiouxme responded
+    that operations are "idempotent-ish" and on cancellation: backend halts at context checkpoint, frontend
+    can retry. Both agree the orchestration mechanism can iterate post-merge. A minimal fix: use a detached
+    context for the write path so client disconnect doesn't corrupt state.
+  </p>
+<pre>// clearBQLabels passes ctx to BQ (respects cancellation):
+q := r.bqClient.Query(ctx, bqlabel.JobRunLabelsReEvaluateDelete, queryStr)
+_, err := q.Read(ctx)
+
+// but getJobRunFiles ignores request ctx entirely:
+// query.go:134:
+ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)</pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding sev-nit">
+  <div class="finding-title"><span class="tag tag-nit">nit</span> Context not propagated to GORM DB queries</div>
+  <div class="finding-loc"><code>pkg/api/jobrunscan/reevaluate.go:137, 373</code></div>
+  <p>
+    <code>loadActiveSymptoms</code> and <code>loadLabelDefinitions</code> use <code>r.db.DB.Find(...)</code>
+    without <code>.WithContext(ctx)</code>. Request cancellation won't propagate to these DB queries.
+  </p>
+<pre>res := r.db.DB.Order("id").Find(&amp;all)
+// should be:
+res := r.db.DB.WithContext(ctx).Order("id").Find(&amp;all)</pre>
+</div>
+
+<div class="finding sev-nit">
+  <div class="finding-title"><span class="tag tag-nit">nit</span> DisallowUnknownFields is stricter than peer handlers</div>
+  <div class="finding-loc"><code>pkg/sippyserver/job_run_scan.go:186</code></div>
+  <p>
+    No other handler in this file uses <code>DisallowUnknownFields()</code>. A client sending a future field
+    gets 400 from this endpoint while all other endpoints silently ignore unknown fields. Deliberate
+    hardening is fine but creates inconsistency. The <code>MaxBytesReader</code> at line 184 is a nice
+    touch absent elsewhere.
+  </p>
+<pre>req.Body = http.MaxBytesReader(w, req.Body, 1&lt;&lt;20)
+dec := json.NewDecoder(req.Body)
+dec.DisallowUnknownFields()  // unique among handlers in this file</pre>
+</div>
+
+<div class="finding sev-nit">
+  <div class="finding-title"><span class="tag tag-nit">nit</span> nil-db guard in production code is a test accommodation</div>
+  <div class="finding-loc"><code>pkg/api/jobrunscan/reevaluate.go:368</code></div>
+  <p>
+    <code>loadLabelDefinitions</code> checks <code>r.db == nil</code> solely because
+    <code>TestBuildOutputs</code> constructs <code>ReEvaluator{gcsBucket: "test-bucket"}</code> with nil db.
+  </p>
+<pre>if ids.Len() == 0 || r.db == nil {
+    return nil, nil
+}</pre>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding sev-question">
+  <div class="finding-title"><span class="tag tag-question">question</span> Streaming buffer skip can produce duplicate BQ rows</div>
+  <div class="finding-loc"><code>pkg/api/jobrunscan/reevaluate.go:449-453</code></div>
+  <p>
+    When <code>clearBQLabels</code> hits a streaming buffer error, it swallows the error and continues.
+    New labels are still inserted, producing duplicates. The author confirmed (2026-06-22) this is
+    acceptable: labels are collapsed on display, and failure to delete only means stale labels from changed
+    symptoms may persist. Should the API README mention this limitation?
+  </p>
+<pre>if strings.Contains(err.Error(), "streaming buffer") {
+    log.WithError(err).WithField("buildID", buildID).Warn(
+        "symptom reEval: BQ delete hit streaming buffer, skipping")
+    return nil  // swallows error, proceeds to insert
+}</pre>
+</div>
+
+<h3>Resolved since previous review</h3>
+
+<div class="finding sev-resolved">
+  <div class="finding-title"><span class="tag tag-resolved">resolved</span> BQ date filter inconsistency between delete and query</div>
+  <div class="finding-loc">Fixed in <code>075eebdf4</code></div>
+  <p><code>queryNonSymptomLabels</code> now uses <code>= @startDate</code>, matching <code>clearBQLabels</code>.</p>
+</div>
+
+<div class="finding sev-resolved">
+  <div class="finding-title"><span class="tag tag-resolved">resolved</span> New Manager worker pool created per job run</div>
+  <div class="finding-loc">Fixed in <code>3d811abca</code></div>
+  <p><code>Manager</code> is now a field on <code>ReEvaluator</code>, injected via <code>NewReEvaluator()</code>.
+    Handler passes <code>s.jobartifactsManager</code> (server-wide instance).</p>
+</div>
+
+<div class="finding sev-resolved">
+  <div class="finding-title"><span class="tag tag-resolved">resolved</span> mergeLabels: unnecessary loop over manualLabels</div>
+  <div class="finding-loc">Fixed in <code>102e28e3a</code></div>
+  <p>Now uses <code>sets.New[string](manualLabels...)</code> directly.</p>
+</div>
+
+<h2>Things I checked and found fine</h2>
+<ul class="checked-list">
+  <li><code>BulkInsertJobRunLabels</code> extraction: clean refactor, existing annotator becomes thin wrapper.</li>
+  <li>HATEOAS links follow project conventions (per-result symptom links, self link).</li>
+  <li><code>sets.New[string]()</code> used consistently throughout.</li>
+  <li>GCS cleanup under <code>artifacts/job_labels/</code> is safe: only cloud function and re-evaluator write there; annotator writes BQ only.</li>
+  <li><code>WriteHTMLSummaryToBucket</code> writes <code>label-summary.html</code> inside <code>artifacts/job_labels/</code> prefix, correctly cleaned up by <code>clearGCSLabels</code>.</li>
+  <li>Matcher construction with <code>(0, 0, 1)</code> args correct for single-match detection.</li>
+  <li>Nil <code>ContentMatcher</code> for <code>MatcherTypeFile</code> correctly treated as file-existence match.</li>
+  <li>CEL matcher type excluded with logged warning.</li>
+  <li>Symptoms without labels filtered out in <code>filterRelevantSymptoms</code>.</li>
+  <li>Unit tests cover validation, filtering, merging, URL parsing, matcher construction, output building.</li>
+  <li>Functional tests gated behind env vars following <code>releasesync_functional_test.go</code> pattern.</li>
+  <li>Route registration with <code>LocalDBCapability</code> + <code>WriteEndpointsCapability</code> matches security model.</li>
+  <li>PostgreSQL label update uses diff-based merge to avoid streaming buffer dependency.</li>
+  <li><code>release_job_runs</code> update correctly conditional on existence.</li>
+  <li>Regression data left to regression cache loader (no direct update needed).</li>
+  <li>APM/tooling changes are mechanical.</li>
+  <li>Structured logging migration is correct and consistent.</li>
+  <li><code>sets.New[string]()</code> + <code>.UnsortedList()</code> migration handled correctly; test comparisons updated to <code>sameStrings</code> with sort.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The cancellation hazard remains even for single-run requests: <code>clearBQLabels</code> uses request
+    <code>ctx</code> (BQ respects cancellation), but <code>getJobRunFiles</code> uses
+    <code>context.Background()</code>. If ctx cancels between the BQ delete and subsequent writes, the
+    job run loses its symptom labels. The frontend-worker-pool design reduces timeout risk but does not
+    eliminate this race. mstaeble agrees backend orchestration would be better but both reviewers accept
+    iterating post-merge. A minimal fix: use a detached context for the write path.</li>
+  <li>Should the streaming buffer skip be surfaced in the per-run result (e.g., a <code>warnings</code> field)
+    rather than silently logged?</li>
+</ul>
+
+</div>
+</body>
+</html>
