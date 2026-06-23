@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3653</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #24292f; }
+h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+.meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9em; }
+.meta td { padding: 0.15rem 0.6rem 0.15rem 0; }
+.verdict { background: #dafbe1; border: 1px solid #a7f3d0; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
+.verdict strong { font-size: 1.05em; }
+ul { padding-left: 1.4rem; }
+li { margin-bottom: 0.3rem; }
+a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3653</h1>
+
+<div class="meta">
+<table>
+<tr><td><strong>PR</strong></td><td><a href="https://github.com/openshift/sippy/pull/3653">openshift/sippy#3653</a></td></tr>
+<tr><td><strong>Title</strong></td><td>use TIMENOW placeholder in job runs matview</td></tr>
+<tr><td><strong>Author</strong></td><td>mstaeble</td></tr>
+<tr><td><strong>Base</strong></td><td>main</td></tr>
+<tr><td><strong>Head SHA</strong></td><td><code>e0dc60a5fb8ea2e446f15adaf00654a47fbdf629</code></td></tr>
+<tr><td><strong>Reviewed</strong></td><td>2026-06-23T12:21:39Z</td></tr>
+</table>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+<strong>Approve</strong>
+<p>Clean, minimal, correct fix. The three substitutions are consistent with every other matview in the file, the replacement pipeline in <code>syncPostgresMaterializedViews</code> handles this matview, and production semantics are unchanged (<code>NOW()</code> = <code>CURRENT_TIMESTAMP</code> in PostgreSQL).</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+<li>Replaces three instances of <code>CURRENT_TIMESTAMP</code> with the <code>|||TIMENOW|||</code> placeholder in the <code>prow_job_runs_report_matview</code> SQL definition in <code>pkg/db/views.go</code>.</li>
+<li>This was the only matview still using <code>CURRENT_TIMESTAMP</code> directly; all others already used the placeholder.</li>
+<li>In production, <code>|||TIMENOW|||</code> resolves to <code>NOW()</code>, so runtime behavior is unchanged.</li>
+<li>With <code>--pinned-time</code> (seed data workflow), it resolves to a fixed timestamp, allowing the matview to return rows for seed data with past-dated timestamps.</li>
+<li>Fixes a regression introduced in PR #3616, which added the 90-day time bound using <code>CURRENT_TIMESTAMP</code> instead of the established convention.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>No findings. All review angles came back clean.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+<li>Placeholder syntax matches exactly: <code>|||TIMENOW|||</code> is the same token used in all other matviews in the file.</li>
+<li>Replacement pipeline coverage: <code>syncPostgresMaterializedViews</code> (lines 97-105) applies <code>|||TIMENOW|||</code> substitution to all matviews, including this one.</li>
+<li>Production equivalence: <code>NOW()</code> and <code>CURRENT_TIMESTAMP</code> are interchangeable in PostgreSQL.</li>
+<li>No remaining <code>CURRENT_TIMESTAMP</code> in matview definitions after this change.</li>
+<li>No BigQuery parity concern: this matview is PostgreSQL-only.</li>
+<li>No CLAUDE.md convention violations.</li>
+<li>Surrounding SQL syntax is unaffected by the substitution.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<p>None.</p>
+
+</body>
+</html>
