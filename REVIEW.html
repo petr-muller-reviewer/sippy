@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3612</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    background: #fff;
+    padding: 2rem 1rem;
+  }
+  .container { max-width: 54rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 0.75rem; padding-bottom: 0.3rem; border-bottom: 1px solid #d0d7de; }
+  h3 { font-size: 1rem; margin: 1.25rem 0 0.4rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.875em;
+    background: #f6f8fa;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8125rem;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.5rem 0 1rem;
+    line-height: 1.5;
+  }
+  .meta {
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+  .meta td { padding: 0.15rem 0.75rem 0.15rem 0; vertical-align: top; }
+  .meta td:first-child { font-weight: 600; white-space: nowrap; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .verdict {
+    border-left: 4px solid #bf8700;
+    background: #fff8c5;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 0 6px 6px 0;
+  }
+  .verdict strong { color: #9a6700; }
+  .severity {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    margin-right: 0.4rem;
+    vertical-align: middle;
+  }
+  .sev-shouldfix { background: #fff8c5; color: #9a6700; }
+  .sev-nit { background: #ddf4ff; color: #0969da; }
+  .sev-question { background: #f6f8fa; color: #57606a; }
+  .finding { margin-bottom: 1.5rem; }
+  .finding h3 { margin-bottom: 0.25rem; }
+  .finding .where { font-size: 0.875rem; color: #57606a; margin-bottom: 0.35rem; }
+  .highlight { background: #fff3cd; padding: 0.1em 0.2em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: Proposed Implementation for Spot Check Jobs</h1>
+<table class="meta">
+  <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3612">openshift/sippy#3612</a></td></tr>
+  <tr><td>Author</td><td>dgoodwin</td></tr>
+  <tr><td>Head SHA</td><td><code>0b71bbed5549bbdb8c3d784a3fefd7ab7e641f76</code></td></tr>
+  <tr><td>Base</td><td>main</td></tr>
+  <tr><td>Reviewed</td><td>2026-06-12T13:23:26Z</td></tr>
+  <tr><td>Size</td><td>+2753 / -362 across 37 files</td></tr>
+</table>
+
+<div class="verdict">
+  <strong>Needs Discussion</strong> &mdash;
+  The design is sound and the middleware refactoring is well-executed. Two issues need resolution before merge:
+  a casing mismatch between variant registry and BQ fallback SQL that can create duplicate groups during transition,
+  and a SpotCheckSample fallback that causes every CR report (across all 61 views) to run a spot-check BQ query even
+  when the view doesn't configure spot-check analysis. Neither is hard to fix, but both affect correctness or cost.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces <strong>spot-check jobs</strong> to Component Readiness: rarely-run CI jobs (cpu-partitioning, etcd-scaling) evaluated on a simple "did the job pass at least once in 30 days" heuristic, rather than per-test-case Fisher's Exact analysis.</li>
+  <li>Adds <code>SpotCheckComponent</code> and <code>SpotCheckCapability</code> variant classification, a new <code>spotcheck</code> job tier (replacing <code>rare</code>), and BigQuery queries to fetch job-level pass/fail data.</li>
+  <li>Implements a <code>spotcheckjobs</code> middleware that injects synthetic test results into the component report and claims analysis for spot-check tests.</li>
+  <li><strong>Refactors the analysis pipeline:</strong> extracts <code>assessComponentStatus</code> into three middleware packages (NewTestPassRate, AllTestsPassRate, FisherExact) using a first-responder-wins <code>Analyze</code> method on the middleware interface.</li>
+  <li>Frontend conditionally hides basis-related columns and stats for spot-check tests.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should Fix</h3>
+
+<div class="finding">
+  <h3><span class="severity sev-shouldfix">should fix</span> Component name casing mismatch between variant registry and BQ fallback</h3>
+  <div class="where"><code>pkg/variantregistry/ocp.go:768</code> vs <code>pkg/api/componentreadiness/dataprovider/bigquery/provider.go:385</code></div>
+  <p>The variant setter uses <code>"Node / <span class="highlight">k</span>ubelet"</code> but the BigQuery COALESCE fallback produces <code>'Node / <span class="highlight">K</span>ubelet'</code>. During the transition period when both paths can fire for the same job, <code>COALESCE</code> prefers the variant value (lowercase k), so groups with variants populated will have a different component string than groups without. This can create duplicate rows in the CR grid or cause drill-down queries to miss results.</p>
+<pre>// ocp.go:768
+{[]string{"-cpu-partitioning"}, "Node / kubelet", "CPU Partitioning"},
+
+// provider.go:385  (BQ fallback)
+WHEN LOWER(jobs.prowjob_job_name) LIKE '%%cpu-partitioning%%' THEN 'Node / Kubelet'</pre>
+  <p>Pick one casing and use it in both places. Verify which is the correct OCPBUGS component name.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity sev-shouldfix">should fix</span> SpotCheckSample always-on fallback causes unnecessary BQ queries</h3>
+  <div class="where"><code>pkg/api/componentreadiness/utils/queryparamparser.go:227-235</code></div>
+  <p>When no view provides <code>SpotCheckSample</code>, the parser defaults it from the sample release dates. This means <code>SpotCheckJobs</code> middleware is instantiated and runs a BigQuery query on <em>every</em> component report request for all 61 views, not just the one with <code>spot_check_sample</code> configured. The middleware's <code>Analyze</code> correctly skips non-spot-check tests, but the BQ query cost is incurred unconditionally.</p>
+<pre>// queryparamparser.go:227-235
+if opts.SpotCheckSample == nil &amp;&amp; !opts.SampleRelease.Start.IsZero() &amp;&amp;
+    !opts.SampleRelease.End.IsZero() {
+    opts.SpotCheckSample = &amp;reqopts.Release{
+        Name:  opts.SampleRelease.Name,
+        Start: opts.SampleRelease.Start,
+        End:   opts.SampleRelease.End,
+    }
+}</pre>
+  <p>Consider limiting the fallback to test details drill-down requests that target a <code>spotcheck:</code> test ID, or document why the always-on behavior is intentional.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding">
+  <h3><span class="severity sev-nit">nit</span> Duplicate comment in initializeMiddleware</h3>
+  <div class="where"><code>pkg/api/componentreadiness/component_report.go:280,287</code></div>
+  <p>Both lines say <code>// Initialize all our middleware applicable to this request.</code> &mdash; the first was added by this PR, the second is pre-existing. Remove one.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity sev-nit">nit</span> syntheticTestNameFromID does not restore casing</h3>
+  <div class="where"><code>pkg/api/componentreadiness/middleware/spotcheckjobs/spotcheckjobs.go:306-313</code></div>
+  <p><code>syntheticTestNameFromID</code> reconstructs the display name from the lowercased test ID without title-casing. The displayed name will be <code>[spot-check] node / kubelet / cpu partitioning</code> instead of properly cased. Compare with <code>syntheticTestName</code> which receives the original-case values and produces correct output.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity sev-nit">nit</span> Design doc committed with stale content</h3>
+  <div class="where"><code>docs/plans/spot-check-jobs.md</code></div>
+  <p>The 439-line design doc describes an <code>AnalysisComplete</code> flag that does not exist in the implementation (replaced by <code>Analyze</code> return value), references specific line numbers that have shifted, and uses "what will change" framing. If this is intended as living documentation, update it to match the implementation. If it was a planning artifact, consider removing it.</p>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding">
+  <h3><span class="severity sev-question">question</span> Postgres provider silently returns empty</h3>
+  <div class="where"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:799-814</code></div>
+  <p>Both spot-check methods return <code>nil, nil</code> &mdash; no error, no results, no log. If someone runs Component Readiness against Postgres with a spot-check-enabled view, spot-check tests will silently not appear. A <code>log.Warn</code> or a comment explaining "BigQuery-only, intentionally no-op" would help future debugging.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="severity sev-question">question</span> Only 5.0-main view has spot_check_sample</h3>
+  <div class="where"><code>config/views.yaml:12-14</code></div>
+  <p>Only 1 of 61 views has <code>spot_check_sample</code> configured. Is this intentional for initial rollout? The snapshot.yaml changes show spot-check variants assigned to jobs from 4.12 through 4.22, suggesting the feature could apply to other release views too.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>Analysis refactoring preserves behavioral equivalence.</strong> The three new analysis middleware (NewTestPassRate &rarr; AllTestsPassRate &rarr; FisherExact) reproduce the exact control flow of the old <code>assessComponentStatus</code> &mdash; confidence initialization, MinimumFailure early return, pity factor, MissingBasis override all preserved.</li>
+  <li><strong>Middleware ordering is correct.</strong> Synthetic injection (SpotCheckJobs) &rarr; data adjustment (ReleaseFallback, RegressionTracker, RegressionAllowances) &rarr; analysis (NewTestPassRate, AllTestsPassRate, FisherExact) &rarr; decoration (LinkInjector).</li>
+  <li><strong><code>Analyze</code> first-responder-wins semantics</strong> in <code>List.Analyze</code> correctly short-circuits on first <code>handled=true</code>.</li>
+  <li><strong>SpotCheckJobs.Analyze status ladder</strong> covers all cases: 0 runs, 1 failure (pending retry), 2 failures (significant), 3+ failures (extreme), any passes (not significant).</li>
+  <li><strong>BQ queries use parameterized values</strong> for user-controlled inputs; variant names go through <code>param.Cleanse</code> consistent with existing patterns.</li>
+  <li><strong>BQ transition strategy</strong> (<code>IN ('spotcheck', 'rare')</code> + COALESCE fallback) is sound.</li>
+  <li><strong><code>validateSpotCheckVariants</code></strong> prevents adding spotcheck tier without component/capability.</li>
+  <li><strong>Frontend changes</strong> are minimal: <code>isSpotCheck</code> conditional hides basis columns/stats without restructuring components. Null-safe since <code>=== 'spot_check'</code> is false for undefined.</li>
+  <li><strong>Test coverage is solid.</strong> Unit tests for each new middleware, spot-check analyze logic, variant matching, query filtering.</li>
+  <li><strong><code>assessComponentStatus</code> fully removed</strong> from both <code>component_report.go</code> and <code>test_details.go</code>.</li>
+  <li><strong>Regression tracking</strong> works with spot-check tests because <code>RegressionTracker.PostAnalysis</code> only checks <code>ReportStatus</code> value, not basis data.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the always-on <code>SpotCheckSample</code> fallback (<code>queryparamparser.go:227-235</code>) intentional? It means every CR report request for every view runs a spot-check BQ query, even when the view has no <code>spot_check_sample</code> configured.</li>
+  <li>Should other release views beyond <code>5.0-main</code> also get <code>spot_check_sample</code> configured?</li>
+  <li>Is <code>"Node / kubelet"</code> the correct OCPBUGS component name? The casing is unusual (lowercase k) and doesn't match the BQ fallback (<code>"Node / Kubelet"</code>).</li>
+</ul>
+
+</div>
+</body>
+</html>
