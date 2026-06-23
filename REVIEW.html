@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: openshift/sippy#3659</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1f2328;
+    background: #fff;
+    max-width: 52em;
+    margin: 2em auto;
+    padding: 0 1.5em;
+  }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #d1d9e0; padding-bottom: .4em; }
+  h2 { font-size: 1.15em; margin-top: 2em; border-bottom: 1px solid #d1d9e0; padding-bottom: .3em; }
+  h3 { font-size: 1em; margin-top: 1.4em; }
+  code {
+    font-family: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: #f6f8fa;
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+  }
+  pre {
+    background: #f6f8fa;
+    padding: 1em;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d1d9e0; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5em; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dt::after { content: ": "; }
+  .meta dd { display: inline; margin: 0; }
+  .meta dd::after { content: ""; display: block; margin-bottom: 0.2em; }
+  .verdict { padding: 0.8em 1em; border-radius: 6px; margin-bottom: 1.5em; }
+  .verdict-request-changes { background: #fff1e5; border-left: 4px solid #d1242f; }
+  .severity { display: inline-block; font-size: 0.78em; font-weight: 700; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+  .sev-blocking { background: #ffebe9; color: #cf222e; }
+  .sev-should-fix { background: #fff8c5; color: #9a6700; }
+  .sev-nit { background: #ddf4ff; color: #0969da; }
+  .sev-question { background: #f6f8fa; color: #656d76; }
+  .finding { margin-bottom: 1.5em; }
+  .finding-where { color: #656d76; font-size: 0.9em; margin-bottom: 0.3em; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: 0.3em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3659</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3659">openshift/sippy#3659</a></dd>
+    <dt>Title</dt><dd>[WIP] Add daily summary table to accelerate matview refreshes</dd>
+    <dt>Author</dt><dd>mstaeble</dd>
+    <dt>Base</dt><dd>main</dd>
+    <dt>Head SHA</dt><dd><code>50ff28f54727a131cdc9c9a03e7b1a5dc3231223</code></dd>
+    <dt>Reviewed at</dt><dd>2026-06-22T12:45:47Z</dd>
+  </dl>
+</div>
+
+<div class="verdict verdict-request-changes">
+  <strong>Verdict: Request changes</strong>
+  <p>Well-engineered performance optimization with solid testing and clear documentation of trade-offs. One compilation break blocks merge. The rest are minor observations and questions for the author.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>test_daily_summaries</code> table that pre-aggregates <code>prow_job_run_tests</code> (~100M+ rows) into daily buckets per (test_id, prow_job_id, suite_id, release, date).</li>
+  <li>Rewrites the test report matview definitions (<code>prow_test_report_7d_matview</code>, <code>prow_test_report_2d_matview</code>) to read from the summary table instead of scanning raw rows.</li>
+  <li>Runs daily summary refresh automatically before matview refreshes as part of <code>RefreshData()</code>.</li>
+  <li>Adds CLI flags (<code>--rebuild-daily-summaries</code>, <code>--daily-summaries-start</code>, <code>--daily-summaries-end</code>) to the <code>sippy refresh</code> command for manual control.</li>
+  <li>Quantizes matview time boundaries from exact timestamps to calendar-day (midnight UTC) boundaries, trading ~1 day of boundary precision for 2-3x faster refreshes.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-blocking">Blocking</span> Compilation break: missed RefreshData call site</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/flags/postgres_benchmarking_test.go:1233</code></div>
+  <p>Still uses the old 3-argument signature. The function now requires a 4th <code>dailysummary.Options</code> argument. This will fail <code>go build ./...</code>.</p>
+  <pre><code>sippyserver.RefreshData(dbc, nil, false)</code></pre>
+</div>
+
+<h3><span class="severity sev-nit">Nit</span> Time-dependent hardcoded date in test</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary_test.go:55</code></div>
+  <p><code>TestRefresh_Incremental</code> uses <code>tp("2026-06-17")</code> which works only because the date is already past. Compare with <code>TestRefresh_IncrementalCapsAtYesterday</code> which correctly uses <code>time.Now().AddDate(0, 0, 1)</code>. Not a practical problem, just inconsistent style.</p>
+  <pre><code>store := &amp;fakeStore{maxSummary: tp("2026-06-17")}</code></pre>
+</div>
+
+<h3><span class="severity sev-nit">Nit</span> No test for EndOverride-only path</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:120-124</code></div>
+  <p>The <code>dateRange</code> function handles EndOverride-only (start auto-resolved, end overridden) but no test covers this path. Code is straightforward, so low risk.</p>
+  <pre><code>endDate := now
+if opts.EndOverride != nil {
+    endDate = *opts.EndOverride
+}</code></pre>
+</div>
+
+<h3><span class="severity sev-question">Question</span> Stale summaries after source data deletion</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/dailysummary/dailysummary.go:27-50</code></div>
+  <p>If rows are deleted from <code>prow_job_run_tests</code>, orphaned summary rows persist with old counts. The upsert <code>INSERT...SELECT</code> only produces rows for data that currently exists, so deleted-source rows are never corrected. Append-only ingestion makes this unlikely, and <code>--rebuild-daily-summaries</code> covers the exceptional case. Worth a sentence in docs for operators?</p>
+</div>
+
+<h3><span class="severity sev-question">Question</span> CASCADE commit overlap with #3658</h3>
+<div class="finding">
+  <div class="finding-where"><code>pkg/db/views.go:156</code></div>
+  <p>This PR carries the CASCADE change that is also PR #3658. If #3658 merges first and this is rebased, the change becomes a no-op in the diff. Is the plan to squash, or will #3658 be dropped in favor of this PR carrying it?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong><code>suite_id=0</code> for NULL suites.</strong> <code>COALESCE(suite_id, 0)</code> in upsert + LEFT JOINs to <code>suites</code> and <code>test_ownerships</code> behave identically for <code>id=0</code> as for NULL (no match, NULL result). Semantics preserved.</li>
+  <li><strong>Date boundary precision.</strong> DATE-to-TIMESTAMP comparisons can exclude up to ~1 day at window start. Documented in PR description, acceptable for trend analysis. Midnight-aligned pinned times avoid it entirely.</li>
+  <li><strong><code>runs</code> column.</strong> Counts all rows via <code>COUNT(*)</code> including non-success/failure/flake statuses. Consistent with original matview behavior.</li>
+  <li><strong><code>valueColumns</code> slice.</strong> Generates both SET and WHERE clauses in upsert, preventing column drift between them.</li>
+  <li><strong>Per-release aggregation loop.</strong> Avoids 51s planner overhead on 3553 sub-partitions. Well-motivated by benchmarks.</li>
+  <li><strong>Non-fatal daily summary failure.</strong> <code>server.go:393-394</code> logs error and continues matview refresh with stale data.</li>
+  <li><strong>Migration idempotency.</strong> <code>IF NOT EXISTS</code> on both table and indexes. Down migration drops cleanly.</li>
+  <li><strong>All <code>RefreshData</code> call sites updated</strong> (load.go, refresh.go, seed_data.go, updatesuites.go) except the benchmarking test.</li>
+  <li><strong>No data pruning.</strong> Summaries accumulate indefinitely. At a few hundred rows per release per day, stays small for years. <code>summary_date</code> index keeps 14-day filter selective.</li>
+  <li><strong><code>TestDailySummary</code> model</strong> in <code>prow.go</code> matches migration schema.</li>
+  <li><strong>Test coverage.</strong> 11 tests cover incremental, caps-at-yesterday, empty-table lookback, rebuild, date overrides, all error paths, and no-releases edge case.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Should stale-summary-after-deletion be documented somewhere for operators, or is <code>--rebuild-daily-summaries</code> sufficient as a catch-all?</li>
+  <li>What is the merge plan for the CASCADE change relative to #3658?</li>
+</ul>
+
+</body>
+</html>
