@@ -1,69 +1,85 @@
 ---
 pr: openshift/sippy#3612
-title: "Proposed Implementation for Spot Check Jobs"
-head_sha: 0b71bbed5549bbdb8c3d784a3fefd7ab7e641f76
+title: "OCPQE-32065: Proposed Implementation for Spot Check Jobs"
+head_sha: 3e9c92baf29ccd3205c08327505d70a8e3d0d3b1
 base: main
-reviewed_at: 2026-06-12T13:23:26Z
+reviewed_at: 2026-06-23T20:24:26Z
 verdict: needs-discussion
 ---
 
 ## Findings
 
-### [should-fix] Component name casing mismatch between variant registry and BQ fallback
-- where: `pkg/variantregistry/ocp.go:768` vs `pkg/api/componentreadiness/dataprovider/bigquery/provider.go:385`
-- concern: The variant setter uses `"Node / kubelet"` (lowercase k) but the BQ COALESCE fallback produces `'Node / Kubelet'` (uppercase K). During transition when both paths can fire, COALESCE prefers the variant value, creating two distinct groups for the same component depending on which branch fires. Pick one casing and use it everywhere.
+### [should-fix] Cache key does not include SpotCheckJobSamples
+- where: `pkg/api/componentreadiness/component_report.go:182-190`
+- concern: `GeneratorCacheKey` cherry-picks fields from `RequestOptions` but omits `SpotCheckJobSamples`. Two requests with identical base/sample releases and variants but different spot-check sample configurations produce the same cache key. The first cached result is silently returned for the second request.
 - excerpt: |
-    // ocp.go:768
-    {[]string{"-cpu-partitioning"}, "Node / kubelet", "CPU Partitioning"},
-    // provider.go:385
-    WHEN LOWER(jobs.prowjob_job_name) LIKE '%%cpu-partitioning%%' THEN 'Node / Kubelet'
+    type GeneratorCacheKey struct {
+        ReportModified *time.Time
+        BaseRelease    reqopts.Release
+        SampleRelease  reqopts.Release
+        VariantOption  reqopts.Variants
+        AdvancedOption reqopts.Advanced
+        TestFilters    reqopts.TestFilters
+        TestIDOptions  []reqopts.TestIdentification
+    }
 
-### [should-fix] SpotCheckSample always-on fallback causes unnecessary BQ queries
-- where: `pkg/api/componentreadiness/utils/queryparamparser.go:227-235`
-- concern: When no view provides `SpotCheckSample`, it defaults to the sample release dates. This means `SpotCheckJobs` middleware is instantiated and its `Query` runs a BQ query on every component report for all 61 views, not just the one with `spot_check_sample` configured. The middleware `Analyze` correctly skips non-spot-check tests, but the BQ query cost is incurred unconditionally. Consider only falling back for test details drill-down requests with a `spotcheck:` test ID.
+### [should-fix] Default SpotCheckJobSamples fallback causes BQ queries for 60 of 61 views
+- where: `pkg/api/componentreadiness/utils/queryparamparser.go:237-251`
+- concern: When a view does not define `spot_check_job_samples`, the fallback creates a default `spotcheck-30d` entry if sample release dates are valid. Since all 60 views without explicit spot-check config have valid dates, `SpotCheckJobs` middleware is instantiated and its `Query` runs a BigQuery scan for every component report. The comment says "so spot-check middleware runs on drill-down requests too," but this also fires for top-level report requests. Gate the fallback on the presence of a `spotcheck-` prefixed `TestID` in `TestIDOptions` (drill-down only), or skip middleware creation at the report level for views without explicit config.
 - excerpt: |
-    if opts.SpotCheckSample == nil && !opts.SampleRelease.Start.IsZero() && !opts.SampleRelease.End.IsZero() {
-        opts.SpotCheckSample = &reqopts.Release{
-            Name:  opts.SampleRelease.Name,
-            Start: opts.SampleRelease.Start,
-            End:   opts.SampleRelease.End,
+    if len(opts.SpotCheckJobSamples) == 0 && !opts.SampleRelease.Start.IsZero() && !opts.SampleRelease.End.IsZero() {
+        opts.SpotCheckJobSamples = []reqopts.SpotCheckJobSampleOpts{
+            {
+                Name: "spotcheck-30d",
+                ...
+            },
         }
     }
 
+### [should-fix] Appending 'rare' to spotCheckIncludeVariants slice may mutate caller's map entry
+- where: `pkg/api/componentreadiness/dataprovider/bigquery/provider.go:477-480,637-640`
+- concern: `values := spotCheckIncludeVariants[group]` gets a slice header pointing to the map entry's backing array. `append(values, "rare")` writes into the backing array if there is spare capacity. While the map entry's `len` stays unchanged so the mutation does not accumulate across calls, any concurrent reader of the backing array past the original length could observe the stale `"rare"`. Copy before appending: `values = append([]string(nil), spotCheckIncludeVariants[group]...)`.
+- excerpt: |
+    values := spotCheckIncludeVariants[group]
+    if group == "JobTier" {
+        values = append(values, "rare")
+    }
+
+### [nit] Spot-check sample resolution duplicated in two files
+- where: `pkg/api/componentreadiness/utils/queryparamparser.go:177-195` vs `pkg/dataloader/regressioncacheloader/regressioncacheloader.go:508-524`
+- concern: Nearly identical 17-line loops resolve `view.SpotCheckJobSamples` into `reqopts.SpotCheckJobSampleOpts`. If resolution logic changes, both must be updated. Extract a shared helper in `utils`.
+
+### [nit] Dead code in MinimumFailure early-return path
+- where: `pkg/api/componentreadiness/middleware/fisherexact/fisherexact.go:83-86`
+- concern: At line 77, `status` is set to `crtest.NotSignificant` (0). At line 83, `if status <= crtest.SignificantTriagedRegression` checks 0 <= -200, always false. The explanation append is unreachable. Pre-existing (copied from old `assessComponentStatus`), but the refactoring is a good opportunity to clean it up.
+- excerpt: |
+    status = crtest.NotSignificant
+    ...
+    if effectiveMinimumFailure != 0 &&
+        (testStats.SampleStats.Total()-samplePass) < effectiveMinimumFailure {
+        if status <= crtest.SignificantTriagedRegression {
+            testStats.Explanations = append(testStats.Explanations, ...)
+        }
+
 ### [nit] Duplicate comment in initializeMiddleware
 - where: `pkg/api/componentreadiness/component_report.go:280,287`
-- concern: Both lines say `// Initialize all our middleware applicable to this request.` — the first was added by this PR, the second is pre-existing. Remove one.
-
-### [nit] syntheticTestNameFromID does not restore casing
-- where: `pkg/api/componentreadiness/middleware/spotcheckjobs/spotcheckjobs.go:306-313`
-- concern: `syntheticTestNameFromID` reconstructs the display name from the lowercased test ID without title-casing. The displayed name will be `[spot-check] node / kubelet / cpu partitioning` instead of properly cased. Compare with `syntheticTestName` which receives original-case values.
-
-### [nit] Design doc committed with stale content
-- where: `docs/plans/spot-check-jobs.md`
-- concern: The 439-line design doc describes an `AnalysisComplete` flag that does not exist in the implementation (replaced by `Analyze` return value), references specific line numbers that have shifted, and uses "what will change" framing. If this is intended as living documentation, update it to reflect the actual implementation. If it was a planning artifact, consider removing it.
-
-### [question] Postgres provider silently returns empty
-- where: `pkg/api/componentreadiness/dataprovider/postgres/provider.go:799-814`
-- concern: Both spot-check methods return `nil, nil` — no error, no results, no log. If someone runs Component Readiness against Postgres with a spot-check-enabled view, spot-check tests will silently not appear. A `log.Warn` or a comment explaining "BigQuery-only, intentionally no-op" would help debugging.
-
-### [question] Only 5.0-main view has spot_check_sample
-- where: `config/views.yaml:12-14`
-- concern: Only 1 of 61 views has `spot_check_sample` configured. Is this intentional for initial rollout, or should other release views (4.18-main, 4.19-main, etc.) also get the spot-check window? The PR description mentions spot-check jobs exist across many releases, and the snapshot.yaml changes show spot-check variants assigned to jobs from 4.12 through 4.22.
+- concern: Both lines say `// Initialize all our middleware applicable to this request.` Remove one.
 
 ## Checked
-- Analysis middleware refactoring preserves behavioral equivalence: `NewTestPassRate` -> `AllTestsPassRate` -> `FisherExact` reproduces the exact control flow of the old `assessComponentStatus` including confidence initialization, MinimumFailure early return, pity factor, and MissingBasis override.
-- Middleware ordering in `initializeMiddleware` is correct: synthetic injection (SpotCheckJobs) -> data adjustment (ReleaseFallback, RegressionTracker, RegressionAllowances) -> analysis (NewTestPassRate, AllTestsPassRate, FisherExact) -> decoration (LinkInjector).
-- `Analyze` first-responder-wins semantics in `List.Analyze` correctly short-circuits on first `handled=true`.
-- SpotCheckJobs.Analyze status ladder covers all cases: 0 runs, 1 failure (pending retry), 2 failures (significant), 3+ failures (extreme), any passes (not significant).
-- BigQuery queries use parameterized values for user-controlled inputs; variant names go through `param.Cleanse` consistent with existing patterns.
-- BQ transition strategy (`IN ('spotcheck', 'rare')` + COALESCE fallback) is sound.
-- `validateSpotCheckVariants` prevents adding spotcheck tier without component/capability.
-- Frontend changes are minimal: `isSpotCheck` conditional hides basis columns/stats without restructuring components. Null-safe since `=== 'spot_check'` is false for undefined.
-- Test coverage: unit tests for each new middleware, spot-check analyze logic, variant matching, query filtering.
-- `assessComponentStatus` is fully removed from both `component_report.go` and `test_details.go`.
+- Analysis middleware refactoring preserves behavioral equivalence: NewTestPassRate -> AllTestsPassRate -> FisherExact reproduces the exact control flow of the old `assessComponentStatus` including confidence initialization, MinimumFailure early return, pity factor, and MissingBasis override.
+- Middleware ordering is correct: synthetic injection (SpotCheckJobs) -> data adjustment (ReleaseFallback, RegressionTracker, RegressionAllowances) -> analysis (NewTestPassRate, AllTestsPassRate, FisherExact) -> decoration (LinkInjector).
+- `List.Analyze` first-responder-wins semantics correctly short-circuits on first `handled=true`.
+- SpotCheckJobs.Analyze status ladder covers all cases: 0 runs (MissingSample), 1 failure (MissingSample/pending retry), 2 failures (SignificantRegression), 3+ failures (ExtremeRegression), any passes (NotSignificant).
+- Go 1.25 loop variable semantics — no loop variable capture bugs in goroutine closures.
+- `param.Cleanse` is a no-op for all standard variant names (Platform, Architecture, Network, JobTier), so the cleanV change in QueryJobRuns and BuildComponentReportQuery is safe.
+- BQ queries use parameterized values for user-controlled inputs; variant names go through `param.Cleanse` consistent with existing patterns.
+- BQ transition strategy (`IN ('spotcheck-30d', 'rare')` + COALESCE fallback) is sound.
+- Frontend `isSpotCheck` conditionals are null-safe (`=== 'spot_check'` is false for undefined).
+- Test coverage is solid: unit tests for each middleware's Analyze, spot-check status ladder, variant matching, query filtering.
+- Synthetic test ID round-trip is correct for current capability names ("CPU Partitioning", "Scaling") — neither contains hyphens.
+- Postgres provider stubs return `nil, nil` — acceptable as BigQuery-only feature; comment documents intent.
 - Regression tracking works with spot-check tests because `RegressionTracker.PostAnalysis` only checks `ReportStatus` value, not basis data.
 
 ## Open questions
-- Is the always-on SpotCheckSample fallback (queryparamparser.go:227-235) intentional? It means every CR report request for every view runs a spot-check BQ query, even when the view has no spot_check_sample configured.
-- Should other release views beyond 5.0-main also get spot_check_sample configured?
-- Is `"Node / kubelet"` the correct OCPBUGS component name? The casing is unusual (lowercase k).
+- Is the always-on `SpotCheckJobSamples` fallback (queryparamparser.go:237-251) intentional for top-level report requests, or should it be limited to drill-down requests with a `spotcheck-` test ID?
+- Should `GeneratorCacheKey` include `SpotCheckJobSamples` to prevent cache collisions between spot-check and non-spot-check results?
