@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3666</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #24292e; }
+  h1 { font-size: 1.4em; margin-bottom: 4px; }
+  h2 { font-size: 1.1em; margin-top: 2em; border-bottom: 1px solid #e1e4e8; padding-bottom: 6px; }
+  h3 { font-size: 1em; margin-top: 1.2em; margin-bottom: 4px; }
+  code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.88em; background: #f6f8fa; border-radius: 3px; }
+  code { padding: 2px 5px; }
+  pre { padding: 12px 16px; overflow-x: auto; border: 1px solid #e1e4e8; }
+  .meta { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px 16px; font-size: 0.9em; margin-bottom: 1.5em; }
+  .meta a { color: #0366d6; }
+  .verdict { border-left: 4px solid #d73a49; padding: 10px 16px; background: #fff5f5; border-radius: 0 4px 4px 0; margin: 1em 0; }
+  .verdict.approve { border-color: #28a745; background: #f0fff4; }
+  .verdict.discuss { border-color: #e36209; background: #fffbf0; }
+  .finding { margin: 1em 0; padding: 12px 16px; border-left: 3px solid #ccc; background: #fafafa; border-radius: 0 4px 4px 0; }
+  .finding.blocking { border-color: #d73a49; }
+  .finding.should-fix { border-color: #e36209; }
+  .finding.nit { border-color: #6a737d; }
+  .finding.question { border-color: #0366d6; background: #f1f8ff; }
+  .badge { display: inline-block; font-size: 0.75em; font-weight: 600; padding: 2px 8px; border-radius: 12px; margin-right: 6px; text-transform: uppercase; }
+  .badge.blocking { background: #ffeef0; color: #d73a49; }
+  .badge.should-fix { background: #fff3cd; color: #856404; }
+  .badge.nit { background: #f1f1f1; color: #6a737d; }
+  .badge.question { background: #dbedff; color: #0366d6; }
+  .highlight { background: #fffbdd; }
+  ul { padding-left: 1.4em; }
+  li { margin: 0.3em 0; }
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <strong>openshift/sippy#3666</strong> &mdash;
+  <a href="https://github.com/openshift/sippy/pull/3666">ROSAENG-326: Add operator e2e jobs and separate rosa-integration from rosa-stage</a><br>
+  Head: <code>9581923514845fc26cc10eedfb4d33cd019c6608</code> &nbsp;|&nbsp;
+  Base: <code>main</code> &nbsp;|&nbsp;
+  Reviewed: <code>2026-06-23T15:48:31Z</code> &nbsp;|&nbsp;
+  Refreshed: <code>2026-06-23T16:30:13Z</code>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Request changes</strong> — one confirmed job silently dropped from all views; one open question about coverage.
+  The PR's intent (separating integration FVT jobs from rosa-stage) is correct, but the positive-enumeration approach misses at least one production FVT job that was previously tracked. Worth a quick fix before merging.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces the broad catch-all <code>^periodic-ci-openshift-online-rosa-e2e-main-.*</code> in rosa-stage with three specific patterns: nightly (<code>periodics-*</code>), upgrade (<code>upgrade-*</code>), and OCM FVT staging (<code>ocm-fvt-*-staging-*</code>).</li>
+  <li>Adds a new pattern for SRE operator e2e staging jobs to rosa-stage: <code>^periodic-ci-openshift-.*-master-rosa-sts-e2e-promotion-stage$</code>.</li>
+  <li>Populates the previously-empty rosa-integration view with OCM FVT integration and SRE operator integration job patterns.</li>
+  <li>Fixes incorrect placement of 9 integration FVT jobs that the old catch-all was routing into rosa-stage.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should fix</span>
+  <strong>ocm-fvt production job dropped from all views</strong><br>
+  <code>config/openshift-customizations.yaml:72</code><br><br>
+  The job <code>periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-hcp-production-ocm-fvt-periodic-cs-rosa-hcp-ad-production-main</code> exists in <code>config/openshift.yaml</code> and was previously matched by the old catch-all. The new patterns cover <code>*-staging-*</code> (rosa-stage) and <code>*-integration-*</code> (rosa-integration), but there is no pattern for <code>*-production-*</code>. After this PR, that job matches no view and disappears from all dashboards silently.<br><br>
+  <strong>Fix:</strong> Either add a <code>^periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-.*-production-.*</code> pattern to rosa-stage (if staging OCM manages production), or to rosa-production (if it should be tracked there).
+</div>
+
+<div class="finding question">
+  <span class="badge question">question</span>
+  <strong>Daily CI status bot mentioned but not covered</strong><br>
+  <code>config/openshift-customizations.yaml:68</code><br><br>
+  The PR description lists "Daily CI status bot" as a job category that should remain in rosa-stage. None of the three new <code>rosa-e2e-main-*</code> patterns (<code>periodics-*</code>, <code>upgrade-*</code>, <code>ocm-fvt-*-staging-*</code>) would match a daily-status-type job unless it happens to start with <code>periodics-</code>. If this job exists and uses a different prefix, it is now untracked.
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong><code>-master-</code> branch in operator patterns</strong>: verified against <code>config/openshift.yaml</code> — the actual job is <code>periodic-ci-openshift-route-monitor-operator-master-rosa-sts-e2e-promotion-stage</code>. The <code>route-monitor-operator</code> repo uses <code>master</code>, so the pattern is correct.</li>
+  <li><strong>Removing <code>jobs: {}</code> from rosa-integration</strong>: Go nil-map reads and range loops are safe; all callers in <code>pkg/variantregistry/</code> handle nil maps correctly. No panic risk.</li>
+  <li><strong>rosa-integration database registration</strong>: the release was introduced as a registered placeholder in a prior commit; the CLAUDE.md TRT-ticket requirement applies to creating new releases, not populating existing placeholders.</li>
+  <li><strong>Pattern structure and conventions</strong>: regexp-only sections without a <code>jobs:</code> key are consistent with <code>Presubmits</code> and <code>ocp-hypershift</code>. The stage/integration pairing follows the ARO convention.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The job <code>periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-rosa-hcp-production-…</code> is in <code>config/openshift.yaml</code> and now matches no view. Should it go to rosa-stage, rosa-integration, or rosa-production? Can you add a pattern for it?</li>
+  <li>Does the "Daily CI status bot" job actually exist under <code>periodic-ci-openshift-online-rosa-e2e-main-*</code>? If so, which suffix does it use — and will the new <code>periodics-*</code> pattern catch it, or does it need its own entry?</li>
+</ul>
+
+<h2>Activity since initial review</h2>
+<ul>
+  <li><strong>2026-06-23T16:19Z</strong>: smg247 posted <code>/lgtm</code></li>
+  <li><strong>2026-06-23T16:21Z</strong>: openshift-ci[bot] marked PR <strong>APPROVED</strong> (author self-approved + smg247 LGTM)</li>
+  <li>No code changes since review; open findings not addressed</li>
+</ul>
+
+</body>
+</html>
