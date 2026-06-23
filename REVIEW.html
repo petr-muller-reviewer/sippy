@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3665</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #24292e; max-width: 860px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid #e1e4e8; padding-bottom: 0.4em; }
+  h2 { font-size: 1.1em; margin-top: 2em; border-bottom: 1px solid #f0f0f0; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.88em; background: #f6f8fa; border-radius: 3px; }
+  code { padding: 2px 5px; }
+  pre { padding: 12px 16px; overflow-x: auto; border: 1px solid #e1e4e8; }
+  .meta { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px 16px; margin-bottom: 1.5em; font-size: 0.9em; }
+  .meta a { color: #0366d6; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .verdict-approve { background: #e6ffed; border: 1px solid #34d058; border-radius: 6px; padding: 12px 16px; }
+  .verdict-request { background: #fff5f5; border: 1px solid #f97583; border-radius: 6px; padding: 12px 16px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; text-transform: uppercase; }
+  .badge-nit { background: #fff3cd; color: #856404; }
+  .finding { border-left: 3px solid #e1e4e8; padding: 8px 12px; margin: 10px 0; }
+  .finding-nit { border-left-color: #f0ad4e; }
+  ul { padding-left: 1.5em; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3665">openshift/sippy#3665</a><br>
+  <strong>Title:</strong> Add 4.22-qe-auto-release view<br>
+  <strong>Author:</strong> tomasdavidorg<br>
+  <strong>Base:</strong> main<br>
+  <strong>Head SHA:</strong> <code>60bbbb0fe0fb4f48a641a4b678b759db4c046499</code><br>
+  <strong>Reviewed at:</strong> 2026-06-23T20:43:04Z
+</div>
+
+<h1>Review: Add 4.22-qe-auto-release view</h1>
+
+<h2>Verdict</h2>
+<div class="verdict-approve">
+  <strong>Approve</strong><br>
+  Config-only change that faithfully replicates the established <code>qe-auto-release</code> pattern for OCP 4.22. No correctness or behavioral issues found. One cosmetic ordering nit noted below.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a single new entry <code>4.22-qe-auto-release</code> to <code>config/qe-views.yaml</code>.</li>
+  <li>The view compares the current 7-day window (<code>now-7d</code> → <code>now</code>) against the 30-day pre-GA baseline (<code>ga-30d</code> → <code>ga</code>) for OCP 4.22.</li>
+  <li>Scoped to the <code>automated-release</code> procedure, QE/service-delivery-owned jobs, and standard platforms (aws, azure, gcp, rosa, vsphere).</li>
+  <li>No Go code changes; the YAML file is consumed at runtime via CLI flag.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Nits</h3>
+
+<div class="finding finding-nit">
+  <span class="badge badge-nit">nit</span>
+  <strong>4.22 entries appear after 5.0 entries, breaking chronological order</strong><br>
+  <code>config/qe-views.yaml:983</code><br>
+  <p>
+    All prior releases (4.14–4.21) are ordered with lower release numbers before higher ones. The new 4.22 entries were appended at the end of the file, after <code>5.0-qe-main</code> (line 873) and <code>5.0-qe-auto-release</code> (line 927). No runtime impact — the list is not order-sensitive — but it breaks the file's readability convention.
+  </p>
+  <pre>...5.0-qe-auto-release  (line 927)
+  - name: 4.22-qe-auto-release  ← new, appended after 5.0
+    ...
+  - name: 4.22-qe-main          ← also after 5.0</pre>
+  <p>Consider inserting the 4.22 pair before the 5.0 entries.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>base_release.release: "4.22"</code> with <code>ga-30d</code>/<code>ga</code> — correct, same-release baseline is the established pattern for all prior <code>qe-auto-release</code> views.</li>
+  <li><code>sample_release</code> using <code>now-7d</code>/<code>now</code> — correct for an auto-release view monitoring current state.</li>
+  <li><code>Upgrade</code> in <code>db_group_by</code> but absent from <code>include_variants</code> — intentional; absence means "don't filter on this dimension," so all Upgrade values pass through and are grouped for display. Universal across all <code>qe-auto-release</code> entries.</li>
+  <li><code>Procedure: automated-release</code> — recognized variant value in <code>pkg/variantregistry/ocp.go</code>.</li>
+  <li><code>ignore_disruption: true</code> — standard for all <code>qe-auto-release</code> views.</li>
+  <li>No Go code has hardcoded view name lists; the file is consumed via CLI flag, so no secondary changes needed.</li>
+  <li><code>validateViews</code> in <code>component_readiness.go</code> only checks <code>variant_cross_compare</code> vs <code>db_group_by</code> conflicts; this entry has no <code>variant_cross_compare</code>, so it passes cleanly.</li>
+  <li>Platforms, installers, networks, topologies, and advanced options match the <code>4.21-qe-auto-release</code> entry exactly.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Should the 4.22 entries be reordered to appear before the 5.0-* entries to restore chronological ordering in the file?</li>
+</ul>
+
+</body>
+</html>
