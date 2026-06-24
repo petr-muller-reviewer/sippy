@@ -24,10 +24,12 @@
   .sev-blocking { background: #ffebe9; color: #cf222e; }
   .sev-should-fix { background: #fff8c5; color: #9a6700; }
   .sev-nit { background: #ddf4ff; color: #0969da; }
+  .sev-resolved { background: #dafbe1; color: #1a7f37; }
   ul { padding-left: 1.5rem; margin-bottom: 0.75rem; }
   li { margin-bottom: 0.35rem; }
   .finding { margin-bottom: 1.5rem; }
   .finding-where { font-size: 0.9rem; color: #57606a; margin-bottom: 0.3rem; }
+  .refresh-note { background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
 </style>
 </head>
 <body>
@@ -39,15 +41,19 @@
 <table>
 <tr><td class="label">PR</td><td><a href="https://github.com/openshift/sippy/pull/3674">openshift/sippy#3674</a></td></tr>
 <tr><td class="label">Author</td><td>mstaeble</td></tr>
-<tr><td class="label">Head SHA</td><td><code>35f162ad368c47cf97bf4797f4a64a7410187255</code></td></tr>
+<tr><td class="label">Head SHA</td><td><code>f4321802008b273bffb2ace4c101f2bbafab03f4</code></td></tr>
 <tr><td class="label">Base</td><td>main</td></tr>
-<tr><td class="label">Reviewed</td><td>2026-06-24T11:25:01Z</td></tr>
+<tr><td class="label">Reviewed</td><td>2026-06-24T14:12:26Z</td></tr>
 <tr><td class="label">Files changed</td><td>39 (+425 / -469)</td></tr>
 </table>
 </div>
 
+<div class="refresh-note">
+<strong>Refreshed:</strong> Updated from <code>35f162a</code> to <code>f432180</code> (1 new commit, 3 files changed: +17/-19). Partition creation moved before loaders; seed_data uses capability constants; <code>release-definitions</code> added to <code>loaderOrder</code>. One finding resolved, one updated.
+</div>
+
 <div class="verdict verdict-request-changes">
-<strong>Verdict: Request changes</strong> &mdash; One nil-pointer panic path in production code needs fixing before merge. Two additional issues around first-run behavior and silent error suppression should also be addressed.
+<strong>Verdict: Request changes</strong> &mdash; One nil-pointer panic path in production code needs fixing before merge. The first-run bootstrap concern is slightly worsened by the latest commit (partition creation also affected now).
 </div>
 
 <h2>What this PR does</h2>
@@ -57,6 +63,13 @@
   <li>Migrates all release-data consumers (API endpoints, component readiness, metrics, triage, Jira automation, MCP tools) from <code>v1.Release</code> to <code>models.ReleaseDefinition</code>, reading from PostgreSQL instead of BigQuery.</li>
   <li>Removes <code>QueryReleases</code> and <code>QueryReleaseDates</code> from the <code>DataProvider</code> interface, and deletes the hardcoded <code>releaseMetadata</code> map from the Postgres provider.</li>
   <li>Adds seed data for release definitions so the dev/test environment works without a BQ connection.</li>
+</ul>
+
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>Partition creation block moved from after loaders back to before loaders, reusing the initial <code>releaseDefs</code> read (eliminates the second <code>GetReleasesFromDB</code> call).</li>
+  <li><code>seed_data.go</code> now uses capability constants (<code>models.CapComponentReadiness</code>, etc.) instead of string literals.</li>
+  <li><code>loaderwithmetrics.go</code> adds <code>release-definitions</code> to the <code>loaderOrder</code> list so it runs first.</li>
 </ul>
 
 <h2>Findings</h2>
@@ -81,29 +94,18 @@ if c.dbc != nil {
 <h3>Should fix</h3>
 
 <div class="finding">
-  <h3><span class="severity sev-should-fix">Should fix</span> First-run bootstrap: all downstream loaders receive empty release definitions</h3>
-  <div class="finding-where"><code>cmd/sippy/load.go:168-173</code></div>
-  <p><code>releaseDefs</code> is read from PostgreSQL at line 173, before the loader loop constructs loaders. On a fresh database the <code>release_definitions</code> table is empty. The <code>release-definitions</code> loader is first in the default list, but all loaders are appended to a slice and run together via <code>loaderwithmetrics.New(loaders).Load()</code>, so the table gets populated too late. The prow loader's fallback (<code>if len(releases) == 0</code>) silently produces zero releases, making the entire first load cycle a no-op with no error reported.</p>
-  <p>The comment on lines 168-170 acknowledges this ("for subsequent runs"), but silent success on first run is surprising behavior.</p>
-  <pre><code>// Read release definitions from PG for downstream loader construction.
-// On the first run the table may be empty; the release-definitions
-// loader will populate it for subsequent runs.
-var releaseDefs []models.ReleaseDefinition
+  <h3><span class="severity sev-should-fix">Should fix</span> First-run bootstrap: loaders and partition creation use empty release definitions</h3>
+  <div class="finding-where"><code>cmd/sippy/load.go:168-186</code></div>
+  <p><code>releaseDefs</code> is read from PostgreSQL at line 173, before the loader loop constructs loaders. On a fresh database the <code>release_definitions</code> table is empty. All loaders are constructed with empty <code>releaseDefs</code>, making the first load cycle a no-op.</p>
+  <p>The latest commit moves partition creation from after loaders (where it re-queried and would have found populated data) to before loaders. On first run: zero loaders load data AND zero partitions are created.</p>
+  <pre><code>var releaseDefs []models.ReleaseDefinition
 if dbErr == nil {
     releaseDefs, _ = api.GetReleasesFromDB(context.Background(), dbc)
-}</code></pre>
-</div>
-
-<div class="finding">
-  <h3><span class="severity sev-should-fix">Should fix</span> Errors from GetReleasesFromDB silently discarded</h3>
-  <div class="finding-where"><code>cmd/sippy/load.go:173,348</code></div>
-  <p>Both calls use blank identifier to ignore errors. The first (line 173) is somewhat defensible since the table may not exist on first migration. The second (line 348) runs inside <code>if f.InitDatabase && dbErr == nil</code> after the DB was successfully migrated and loaders completed. Ignoring an error here masks real database problems: <code>ensurePartitionsForReleases</code> receives an empty slice, creates zero partitions, and logs no warning.</p>
-  <pre><code>// Line 173 (before loaders):
-releaseDefs, _ = api.GetReleasesFromDB(context.Background(), dbc)
-
-// Line 348 (after loaders, for partition creation):
-releaseDefs, _ := api.GetReleasesFromDB(context.Background(), dbc)
-err = ensurePartitionsForReleases(dbc, releaseDefs)</code></pre>
+}
+// Ensure partitions exist for all releases (only when InitDatabase is true)
+if f.InitDatabase && dbErr == nil {
+    err = ensurePartitionsForReleases(dbc, releaseDefs)
+    ...</code></pre>
 </div>
 
 <h3>Nits</h3>
@@ -115,6 +117,14 @@ err = ensurePartitionsForReleases(dbc, releaseDefs)</code></pre>
   <pre><code>releasedefloader "github.com/openshift/sippy/pkg/dataloader/releasedefloader"</code></pre>
 </div>
 
+<h3>Resolved</h3>
+
+<div class="finding">
+  <h3><span class="severity sev-resolved">Resolved</span> Errors from GetReleasesFromDB silently discarded (second call)</h3>
+  <div class="finding-where">Previously <code>cmd/sippy/load.go:348</code></div>
+  <p>The second <code>GetReleasesFromDB</code> call (post-loaders, for partition creation) was removed. Partition creation now reuses the initial <code>releaseDefs</code> read. Only one silently-ignored error remains (line 173), which is defensible since the table may not exist on first migration.</p>
+</div>
+
 <h2>Things I checked and was fine with</h2>
 <ul>
   <li>All callers of changed functions (<code>GetReleasesFromDB</code>, <code>BuildReleasesResponse</code>, <code>NewReleaseFallbackMiddleware</code>, <code>NewComponentReportGenerator</code>, etc.) properly updated to pass <code>[]models.ReleaseDefinition</code>.</li>
@@ -122,16 +132,18 @@ err = ensurePartitionsForReleases(dbc, releaseDefs)</code></pre>
   <li><code>ReleaseDefinition</code> model schema matches BigQuery source fields. Upsert in <code>syncReleaseDefinitions</code> uses proper ON CONFLICT with column updates.</li>
   <li><code>HasCapability</code> on nil/empty <code>Capabilities</code> slice is safe (returns false, same as old <code>map[ReleaseCapability]bool</code> behavior).</li>
   <li>DB migration adds <code>ReleaseDefinition</code> to the auto-migrate list in <code>db.go</code>.</li>
-  <li>Seed data function handles all synthetic releases correctly with <code>FirstOrCreate</code>.</li>
-  <li><code>ReleaseRowToDefinition</code> preserves all fields from the BQ row including nullable Patch, GADate, DevelStartDate.</li>
+  <li>Seed data function handles all synthetic releases correctly with <code>FirstOrCreate</code>. Now uses capability constants instead of string literals.</li>
+  <li><code>ReleaseRowToDefinition</code> conversion preserves all fields from the BQ row including nullable Patch, GADate, DevelStartDate.</li>
   <li>Tests updated throughout: <code>releasefallback_test.go</code>, <code>regressionallowances_test.go</code>, <code>queryparamparser_test.go</code>, <code>triage_test.go</code>, <code>utils_test.go</code>.</li>
   <li><code>QueryReleaseDates</code> and <code>QueryReleases</code> cleanly removed from <code>DataProvider</code> interface and both provider implementations.</li>
+  <li><code>release-definitions</code> added to <code>loaderOrder</code> in <code>loaderwithmetrics.go</code>, ensuring deterministic execution order.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
   <li>Is the first-run no-op by design? If so, should the load command log a clear message ("no release definitions found, first load will be partial, re-run to load all data") rather than silently proceeding?</li>
   <li>The old Postgres provider's <code>QueryReleaseDates</code> derived time ranges from actual prow_job_runs data (MIN/MAX timestamps). The new <code>GetReleaseDatesFromDB</code> uses only GA dates. For BigQuery users this is identical behavior, but for Postgres-only users who relied on data-derived ranges, is this intentional?</li>
+  <li>Moving partition creation before loaders means it no longer benefits from the release-definitions loader having populated the table. Was this intentional, or should partition creation remain after loaders?</li>
 </ul>
 
 </div>
