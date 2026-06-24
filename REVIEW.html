@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3676</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 2rem; background: #f9f9f9; }
+  .container { max-width: 860px; margin: 0 auto; background: #fff; padding: 2rem 2.5rem; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.1rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.3rem; margin-top: 2rem; }
+  h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.875rem; }
+  pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem 1rem; overflow-x: auto; }
+  .meta { font-size: 0.85rem; color: #666; margin-bottom: 0.25rem; }
+  .meta a { color: #0969da; }
+  .verdict-box { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.75rem 1rem; border-radius: 4px; margin: 1rem 0; }
+  .verdict-box.approve { background: #dafbe1; border-color: #2da44e; }
+  .verdict-label { font-weight: 700; font-size: 1rem; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem; margin-bottom: 1rem; }
+  .finding.nit { border-left: 4px solid #9a6700; }
+  .finding.blocking { border-left: 4px solid #cf222e; }
+  .finding.should-fix { border-left: 4px solid #bf8700; }
+  .finding.question { border-left: 4px solid #0969da; }
+  .severity-badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.45rem; border-radius: 3px; margin-right: 0.5rem; text-transform: uppercase; }
+  .badge-nit { background: #fff3c6; color: #9a6700; }
+  .badge-blocking { background: #ffd7d5; color: #cf222e; }
+  .badge-should-fix { background: #fff1c6; color: #bf8700; }
+  .badge-question { background: #ddf4ff; color: #0969da; }
+  .file-ref { font-size: 0.8rem; color: #666; margin-bottom: 0.5rem; }
+  .highlight { background: #fffbdd; }
+  ul { margin: 0.5rem 0; padding-left: 1.5rem; }
+  li { margin-bottom: 0.25rem; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: Fix timezone bug in AdjustReleaseTime</h1>
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3676">openshift/sippy#3676</a> &nbsp;|&nbsp;
+  <strong>Author:</strong> mstaeble &nbsp;|&nbsp;
+  <strong>Base:</strong> main
+</div>
+<div class="meta">
+  <strong>Head SHA:</strong> <code>e70471799a1f590a23cea4cc106151e90404d6e7</code> &nbsp;|&nbsp;
+  <strong>Reviewed:</strong> 2026-06-24T14:04:02Z
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box approve">
+  <span class="verdict-label">APPROVE</span>
+</div>
+<p>
+  The fix is correct and sufficient. Adding <code>relTime = relTime.UTC()</code> at the top of <code>AdjustReleaseTime</code>
+  is actually more defensive than the alternative (fixing the call site), since it normalizes for all callers including
+  the <code>ga</code> and <code>end</code> cases. One nit worth considering: the root-cause call site at line 144 still
+  uses local <code>time.Now()</code>, creating a latent inconsistency a future reader won't understand without context.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Fixes an intermittent bug in component readiness query time-window calculation that manifested only when local timezone and UTC were on different calendar dates (e.g., after ~8pm EDT).</li>
+  <li>Root cause: <code>ParseCRReleaseTime</code> passed a local-timezone <code>time.Now()</code> into <code>AdjustReleaseTime</code>, which then compared it against <code>time.Now().UTC()</code> by formatted date string — mismatch after the UTC midnight rollover.</li>
+  <li>Effect: the cache-rounding branch was skipped for end times, returning <code>23:59:59</code> instead of the aligned truncated value, making the sample time window wrong after ~8pm EDT.</li>
+  <li>Fix: normalize <code>relTime</code> to UTC at the top of <code>AdjustReleaseTime</code>, before any date arithmetic or calendar-date comparisons.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding nit">
+  <h3><span class="severity-badge badge-nit">Nit</span>Root-cause call site still uses local <code>time.Now()</code></h3>
+  <div class="file-ref"><code>pkg/util/utils.go:144</code></div>
+  <p>
+    The PR description says "One-line fix: <code>time.Now()</code> → <code>time.Now().UTC()</code> in <code>pkg/util/utils.go:144</code>",
+    but that line was not changed. It still reads:
+  </p>
+  <pre>case "now":
+    relTime = time.Now()</pre>
+  <p>
+    The fix in <code>AdjustReleaseTime</code> at line 179 correctly masks this — <code>relTime.UTC()</code> fires before
+    any day-sensitive operation. But a future reader of line 144 gets no indication anything is wrong, and a future
+    refactor that removes or moves the <code>relTime.UTC()</code> at line 179 (without knowing why it exists) would
+    silently reintroduce the bug. Consider also changing line 144 to <code>time.Now().UTC()</code>,
+    or at minimum adding a brief comment at line 179 explaining the normalization is needed because callers may pass
+    local-timezone times.
+  </p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>The added <code>relTime.UTC()</code> at line 179 fires before both the calendar-date comparison at line 191 (<code>now.Format("2006-01-02") == relTime.Format("2006-01-02")</code>) and the <code>time.Date(relTime.Year(), ...)</code> extraction at lines 186/195. Normalization is complete before any day-sensitive operation.</li>
+  <li><code>releasedates.go:37</code> calls <code>AdjustReleaseTime(*release.GADate, ...)</code>. GA dates are constructed as midnight UTC; the added <code>.UTC()</code> is a no-op there — no behavior change.</li>
+  <li>The <code>ga</code> and <code>end</code> cases in <code>ParseCRReleaseTime</code> also pass into <code>AdjustReleaseTime</code> and now benefit from UTC normalization if those source times were ever non-UTC.</li>
+  <li>Tests in <code>TestParseCRReleaseTime</code> and <code>TestParseComponentReportRequest</code> both compute expected values using <code>time.Now().UTC()</code>, so they now correctly agree with the normalized code path at all hours.</li>
+  <li><code>TruncateAligned(t, factor, 0)</code> reduces to <code>t.Truncate(factor)</code> when offset is 0 — the rounding test case expectation is correct.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Would you consider also changing line 144 to <code>time.Now().UTC()</code> to align with the PR description and remove the inconsistency at the source? The fix in <code>AdjustReleaseTime</code> is more defensive, but having both would make the intent self-documenting at both sites.</li>
+</ul>
+
+</div>
+</body>
+</html>
