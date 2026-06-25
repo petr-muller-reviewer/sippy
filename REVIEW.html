@@ -15,9 +15,11 @@
   .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: .6rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
   .finding { border-left: 3px solid #d0d7de; padding-left: 1rem; margin: 1rem 0; }
   .finding.should-fix { border-left-color: #bf8700; }
+  .finding.resolved { border-left-color: #2da44e; }
   .finding.nit { border-left-color: #57606a; }
   .severity { font-size: 0.8em; font-weight: 600; text-transform: uppercase; padding: .1em .4em; border-radius: 3px; }
   .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.resolved { background: #dafbe1; color: #1a7f37; }
   .severity.nit { background: #eaeef2; color: #57606a; }
   ul { padding-left: 1.4rem; }
   li { margin-bottom: .3rem; }
@@ -31,9 +33,9 @@
 <div class="meta">
   <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3685">openshift/sippy#3685</a><br>
   <strong>Title:</strong> Batch BigQuery label fetching and skip GCS for cached job runs<br>
-  <strong>Head SHA:</strong> <code>cb42fa30b7722d680bf572e9334f4c05254916a4</code><br>
+  <strong>Head SHA:</strong> <code>b8e53133bed6c8b3b8f3edcdbeed86d4579741af</code><br>
   <strong>Base:</strong> main<br>
-  <strong>Reviewed:</strong> 2026-06-25T13:30:42Z
+  <strong>Reviewed:</strong> 2026-06-25T14:09:41Z
 </div>
 
 <h2>Verdict</h2>
@@ -41,6 +43,26 @@
   <strong>Approve.</strong>
   Well-motivated performance optimization backed by solid production and staging evidence. The single correctness-adjacent finding (silent label loss on BQ prefetch failure) is worth addressing but not blocking; the degradation is graceful and labels are non-critical to job run import.
 </div>
+
+<h2>Gate</h2>
+<div class="verdict" style="background: #dafbe1; border-left-color: #2da44e;">
+  <strong>Merge.</strong>
+  The should-fix finding has been addressed in <code>b8e53133</code>. No backward-incompatible API, config, or behavioral changes affect external consumers. CI passed. No unaddressed gating items remain.
+</div>
+
+<h3>Area 1: findings disposition</h3>
+<ul>
+  <li><strong>[should-fix] Prefetch error silently degrades labels</strong>: addressed in <code>b8e53133</code>. Author switched to if-init syntax so <code>labelsCache</code> is only assigned on success.</li>
+  <li><strong>[nit] No batching for large buildID arrays</strong>: not addressed, not expected to be. No current risk.</li>
+</ul>
+
+<h3>Area 2: merge risk</h3>
+<ul>
+  <li><strong>No exported API changes.</strong> <code>prefetchLabels</code> and <code>labelsCache</code> are both unexported.</li>
+  <li><strong>No configuration changes.</strong> No flags, env vars, or config schema changes.</li>
+  <li><strong>Behavioral change is internal only.</strong> The reordering and bulk prefetch change internal data-loading behavior. External consumers see the same data. On BQ prefetch failure, jobs are imported with empty labels instead of being skipped individually (a softer failure mode).</li>
+  <li><strong>No blast radius beyond this service.</strong> Changes are confined to the prow data loader.</li>
+</ul>
 
 <h2>What this PR does</h2>
 <ul>
@@ -50,27 +72,19 @@
   <li>Adds a new <code>prefetchLabels</code> method that collects all build IDs, finds the earliest start time, and issues a single BQ query.</li>
   <li>Changes the cached-run log message from Info to Debug level, appropriate for high-volume entries.</li>
 </ul>
+<p><strong>Since previous review:</strong> Author pushed <code>b8e53133</code> addressing the should-fix finding. Switched prefetch error handling to if-init syntax so <code>labelsCache</code> is only assigned on success and <code>err</code> doesn't leak into function scope.</p>
 
 <h2>Findings</h2>
 
-<h3>Should fix</h3>
+<h3>Resolved</h3>
 
-<div class="finding should-fix">
-  <span class="severity should-fix">should-fix</span>
+<div class="finding resolved">
+  <span class="severity resolved">resolved</span>
   <strong>Prefetch error silently degrades labels for entire batch</strong><br>
   <code>pkg/dataloader/prowloader/prow.go:272-276</code>
   <p>
-    If <code>prefetchLabels</code> fails (BQ outage, credential expiry, transient error), it returns <code>(nil, err)</code>. The error is appended to <code>pl.errors</code>, but <code>pl.labelsCache</code> is set to <code>nil</code> and processing continues. Every worker then reads <code>pl.labelsCache[buildID]</code>, which returns zero value from a nil map. No crash, but all job runs in the batch are imported with empty labels.
+    Resolved in <code>b8e53133</code>. Switched to if-init syntax (<code>if lc, err := ...; err == nil</code>), so <code>labelsCache</code> is only assigned on success. On failure, it stays at its zero value (<code>nil</code>), which is the same runtime behavior, but the code now clearly expresses intent and the <code>err</code> variable no longer leaks into function scope.
   </p>
-  <p>
-    The old per-job code returned the error from <code>processGCSBucketJobRun</code>, which caused that individual job to be skipped (logged as "couldn't import job X, continuing"). The new behavior is a silent data quality change: downstream consumers cannot distinguish "job genuinely has no labels" from "labels couldn't be fetched."
-  </p>
-  <pre>labelsCache, err := pl.prefetchLabels(prowJobs)
-if err != nil {
-    pl.errors = append(pl.errors, errors.Wrap(err, "error pre-fetching labels from BigQuery"))
-}
-pl.labelsCache = labelsCache</pre>
-  <p>Consider initializing to an empty map on error (<code>pl.labelsCache = make(map[string]pq.StringArray)</code>) to make the semantics explicit, or adding a log warning that labels will be missing for this batch.</p>
 </div>
 
 <h3>Nits</h3>
@@ -89,7 +103,7 @@ pl.labelsCache = labelsCache</pre>
   <li><strong>Race condition on <code>labelsCache</code>:</strong> Write at line 276 happens before worker goroutines spawn at line 287. Go memory model guarantees visibility. Safe.</li>
   <li><strong><code>createOrUpdateProwJob</code> called for cached runs:</strong> <code>prowJobCache</code> provides internal caching, so repeated calls for the same job spec are cheap in-memory lookups, not DB writes. Intentional design to keep job definitions current.</li>
   <li><strong>Nil map read safety:</strong> Go returns zero value from nil map reads, no panic possible at the cache lookup on line 999.</li>
-  <li><strong><code>err</code> variable scoping:</strong> <code>:=</code> at line 272 introduces <code>labelsCache</code> and <code>err</code>, then <code>err =</code> at line 315 correctly reuses it. No shadowing issue.</li>
+  <li><strong><code>err</code> variable scoping:</strong> if-init syntax at line 272 keeps <code>err</code> scoped to the if block; <code>err :=</code> at line 315 is independent. Clean.</li>
   <li><strong>Log level change:</strong> Info to Debug for cached runs is reasonable given ~80% of jobs hit this path.</li>
 </ul>
 
