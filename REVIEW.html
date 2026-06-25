@@ -15,6 +15,8 @@
   .meta dd { display: inline; margin: 0 1.2rem 0 0; }
   .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
   .verdict.approve { background: #dafbe1; border-color: #aceebb; }
+  .gate { border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
+  .gate.merge { background: #dafbe1; border: 1px solid #aceebb; }
   .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; }
   .severity.nit { background: #ddf4ff; color: #0969da; }
   .severity.should-fix { background: #fff8c5; color: #9a6700; }
@@ -34,13 +36,19 @@
     <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3678">openshift/sippy#3678</a></dd>
     <dt>Head SHA:</dt><dd><code>c4936c469e2f06ff163858c0d02c2faa467e466e</code></dd>
     <dt>Base:</dt><dd>main</dd>
-    <dt>Reviewed:</dt><dd>2026-06-25T13:35:22Z</dd>
+    <dt>Reviewed:</dt><dd>2026-06-25T15:08:03Z</dd>
   </dl>
 </div>
 
 <div class="verdict approve">
   <strong>Verdict: Approve.</strong>
-  Well-structured performance optimization with correct semantic equivalence. No correctness bugs found. Two minor nits, neither blocking.
+  Well-structured performance optimization with correct semantic equivalence. One should-fix around implicit array ordering invariant. Two minor nits, neither blocking.
+</div>
+
+<div class="gate merge">
+  <strong>Gate: Merge.</strong>
+  All prior findings addressed or non-blocking. CodeRabbit FK constraint concern fixed and confirmed. Model changes are additive only; <code>variants</code> column remains in matview output. On first deploy, <code>test_daily_summaries</code> truncates if rows lack <code>variant_combination_id</code> (brief staleness until next refresh, same pattern as migration 000002). No backward-incompatible changes. E2e tests pass.
+  <br><em>Gated: 2026-06-25T13:51:54Z | Head: <code>c4936c46</code></em>
 </div>
 
 <h2>What this PR does</h2>
@@ -53,6 +61,28 @@
 </ul>
 
 <h2>Findings</h2>
+
+<h3><span class="severity should-fix">should-fix</span> No defensive sort on variant arrays before deduplication</h3>
+<p><code>pkg/db/migrations/000003_create_variant_combinations.up.sql:12-23</code>, <code>pkg/testidentification/ocp_variants.go:129-138</code></p>
+<pre>-- trigger function (no sort):
+INSERT INTO variant_combinations (variants)
+VALUES (NEW.variants)
+ON CONFLICT (variants) DO UPDATE SET variants = EXCLUDED.variants
+
+-- Go side (implicit order from importantVariants):
+func (v *openshiftVariants) IdentifyVariants(jobName string) []string {
+    allVariants := v.jobVariants[jobName]
+    return filterVariants(allVariants, importantVariants)
+}</pre>
+<p>
+  The unique index on <code>variant_combinations(variants)</code> uses PostgreSQL array equality, which is
+  order-sensitive (<code>{a,b} != {b,a}</code>). There is no explicit sort at the database boundary.
+  Deduplication correctness relies on <code>filterVariants</code> (<code>ocp_variants.go:151-168</code>)
+  always producing a canonical order derived from the fixed <code>importantVariants</code> slice. If that
+  slice is ever reordered, or if variants are set through a different code path, the same logical variant
+  set would produce a new <code>variant_combinations</code> row instead of matching the existing one.
+  Adding a <code>sort()</code> in the trigger function or documenting the invariant would make the contract explicit.
+</p>
 
 <h3><span class="severity nit">nit</span> Down migration does not document GORM-managed table dependency</h3>
 <p><code>pkg/db/migrations/000003_create_variant_combinations.down.sql:1-2</code></p>
@@ -98,10 +128,12 @@ WHERE prow_jobs.variants = vc.variants
   <li><strong>Window function partition:</strong> <code>PARTITION BY base.id, base.suite_name, base.release</code> is unchanged from before the PR.</li>
   <li><strong>ON CONFLICT in daily summary insert:</strong> keyed on <code>(test_id, prow_job_id, suite_id, release, summary_date)</code>, same as before. <code>variant_combination_id</code> is an update-target column, not a conflict key.</li>
   <li><strong>Denormalization staleness:</strong> if <code>prow_jobs.variants</code> changes, existing <code>test_daily_summaries</code> rows retain the old <code>variant_combination_id</code> until re-aggregated. This is not a regression; the old matview had equivalent staleness via the prow_jobs join.</li>
+  <li><strong>Variant array ordering:</strong> <code>filterVariants</code> (<code>ocp_variants.go:151-168</code>) produces a deterministic order governed by the fixed <code>importantVariants</code> slice, and <code>IdentifyVariants</code> is the sole code path that sets <code>prow_jobs.Variants</code>. The invariant holds today but is implicit (see should-fix finding).</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
+  <li>The unique index on <code>variant_combinations(variants)</code> relies on array element order for equality. Would it be worth adding a <code>sort()</code> in the PL/pgSQL trigger function to normalize the array before lookup, making the deduplication robust against upstream ordering changes?</li>
   <li>The down migration drops only the trigger function (SQL-managed) while leaving the <code>variant_combinations</code> table and FK columns (GORM-managed). Migration 000002 creates <code>test_daily_summaries</code> entirely in SQL and its down drops the table. Was the split intentional here, or would it be cleaner to also create <code>variant_combinations</code> in the SQL migration for consistency?</li>
   <li>Would it be worth adding an <code>IF EXISTS</code> guard around the backfill INSERT/UPDATE block (similar to the truncate guard) to make the "runs only once" intent explicit?</li>
 </ul>
