@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3687</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 48em; margin: 2em auto; padding: 0 1em; color: #1a1a1a; }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #0969da; padding-bottom: 0.3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.3em; border-radius: 3px; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8em 1em; margin-bottom: 1.5em; font-size: 0.9em; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.5em 0 0.3em; }
+  .verdict { background: #dafbe1; border-left: 4px solid #1a7f37; padding: 0.6em 1em; border-radius: 4px; margin: 1em 0; }
+  ul { padding-left: 1.5em; }
+  li { margin-bottom: 0.4em; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: Remove unused columns from CR BigQuery queries</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3687">openshift/sippy#3687</a></dd>
+    <dt>Head SHA:</dt><dd><code>0d400af1c4a9aae4531175e41b93a9a8b00b8c45</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-06-25T13:30:46Z</dd>
+    <dt>Author:</dt><dd>mstaeble</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+  <p>Straightforward removal of dead columns from two query paths. The columns were selected but never consumed by their respective deserializers. No functional change, reduces BigQuery bytes scanned.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Removes <code>test_suite</code>, <code>file_path</code>, and <code>capabilities</code> from the BigQuery <code>buildTestDetailsQuery</code> SELECT clause. These columns were returned but never parsed by <code>deserializeRowToJobRunTestReportStatus</code>.</li>
+  <li>Removes <code>capabilities</code> from the PostgreSQL <code>testDetailRow</code> struct and <code>testDetailQuery</code> SELECT, where the field was selected but never accessed in the row-processing loop.</li>
+  <li>Keeps <code>file_path</code> in the BigQuery GROUP BY clause to preserve correct aggregation semantics (valid SQL, intentional).</li>
+  <li>Removes stale TODO comments about unused columns and outdated debug log references in comment blocks.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>No findings. The change is mechanical and correct.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>file_path</code> remaining in GROUP BY (line 623) after removal from SELECT: valid BigQuery SQL, explicitly called out in the PR description as intentional.</li>
+  <li><code>deserializeRowToTestStatus</code> still handles <code>test_suite</code> (line 805) and <code>capabilities</code> (line 824): this is correct because that deserializer serves <code>BuildComponentReportQuery</code>, which still selects those columns. The test details path uses a different deserializer (<code>deserializeRowToJobRunTestReportStatus</code>, line 1051) that never referenced the removed columns.</li>
+  <li>Both BigQuery deserializers use name-based column matching via <code>fieldSchema.Name</code>, not positional indexing. Removing columns from SELECT cannot cause index-shift bugs.</li>
+  <li>PostgreSQL <code>testDetailRow.Capabilities</code> was selected into the struct but the field was never read in the row-processing loop. Safe to remove.</li>
+  <li>Provider parity is maintained: neither BigQuery nor PostgreSQL test details queries now return these unused columns. The test status queries (which do use <code>test_suite</code> and <code>capabilities</code>) are untouched in both providers.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<p>None.</p>
+
+</body>
+</html>
