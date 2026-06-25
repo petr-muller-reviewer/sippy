@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3685</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #24292f; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; background: #f6f8fa; padding: .15em .35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; overflow-x: auto; border-radius: 6px; font-size: 0.85em; line-height: 1.45; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9em; }
+  .meta strong { display: inline-block; min-width: 100px; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: .6rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .finding { border-left: 3px solid #d0d7de; padding-left: 1rem; margin: 1rem 0; }
+  .finding.should-fix { border-left-color: #bf8700; }
+  .finding.nit { border-left-color: #57606a; }
+  .severity { font-size: 0.8em; font-weight: 600; text-transform: uppercase; padding: .1em .4em; border-radius: 3px; }
+  .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.nit { background: #eaeef2; color: #57606a; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: .3rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3685</h1>
+
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3685">openshift/sippy#3685</a><br>
+  <strong>Title:</strong> Batch BigQuery label fetching and skip GCS for cached job runs<br>
+  <strong>Head SHA:</strong> <code>cb42fa30b7722d680bf572e9334f4c05254916a4</code><br>
+  <strong>Base:</strong> main<br>
+  <strong>Reviewed:</strong> 2026-06-25T13:30:42Z
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+  Well-motivated performance optimization backed by solid production and staging evidence. The single correctness-adjacent finding (silent label loss on BQ prefetch failure) is worth addressing but not blocking; the degradation is graceful and labels are non-critical to job run import.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces per-job BigQuery label queries with a single bulk prefetch before the worker loop, eliminating thousands of individual BQ round-trips per load cycle.</li>
+  <li>Moves the <code>prowJobRunCache</code> check before the GCS <code>FindAllMatches</code> listing so already-processed runs skip the expensive object listing entirely (~80% of jobs in warm runs).</li>
+  <li>Keeps <code>createOrUpdateProwJob</code> before the cache check to ensure job definitions (variants, release) stay current even for cached runs.</li>
+  <li>Adds a new <code>prefetchLabels</code> method that collects all build IDs, finds the earliest start time, and issues a single BQ query.</li>
+  <li>Changes the cached-run log message from Info to Debug level, appropriate for high-volume entries.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="severity should-fix">should-fix</span>
+  <strong>Prefetch error silently degrades labels for entire batch</strong><br>
+  <code>pkg/dataloader/prowloader/prow.go:272-276</code>
+  <p>
+    If <code>prefetchLabels</code> fails (BQ outage, credential expiry, transient error), it returns <code>(nil, err)</code>. The error is appended to <code>pl.errors</code>, but <code>pl.labelsCache</code> is set to <code>nil</code> and processing continues. Every worker then reads <code>pl.labelsCache[buildID]</code>, which returns zero value from a nil map. No crash, but all job runs in the batch are imported with empty labels.
+  </p>
+  <p>
+    The old per-job code returned the error from <code>processGCSBucketJobRun</code>, which caused that individual job to be skipped (logged as "couldn't import job X, continuing"). The new behavior is a silent data quality change: downstream consumers cannot distinguish "job genuinely has no labels" from "labels couldn't be fetched."
+  </p>
+  <pre>labelsCache, err := pl.prefetchLabels(prowJobs)
+if err != nil {
+    pl.errors = append(pl.errors, errors.Wrap(err, "error pre-fetching labels from BigQuery"))
+}
+pl.labelsCache = labelsCache</pre>
+  <p>Consider initializing to an empty map on error (<code>pl.labelsCache = make(map[string]pq.StringArray)</code>) to make the semantics explicit, or adding a log warning that labels will be missing for this batch.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <span class="severity nit">nit</span>
+  <strong>No batching for large buildID arrays in BQ query</strong><br>
+  <code>pkg/dataloader/prowloader/prow.go:1183</code>
+  <p>
+    All build IDs are passed in a single <code>IN UNNEST(@BuildIDs)</code> parameter with no size guard. Staging tested with 205k build IDs successfully, and production loads (16-21k) are well within BigQuery's 10MB parameter limit. No current risk, but no defensive batching exists for future growth. Low priority, noting for awareness.
+  </p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>Race condition on <code>labelsCache</code>:</strong> Write at line 276 happens before worker goroutines spawn at line 287. Go memory model guarantees visibility. Safe.</li>
+  <li><strong><code>createOrUpdateProwJob</code> called for cached runs:</strong> <code>prowJobCache</code> provides internal caching, so repeated calls for the same job spec are cheap in-memory lookups, not DB writes. Intentional design to keep job definitions current.</li>
+  <li><strong>Nil map read safety:</strong> Go returns zero value from nil map reads, no panic possible at the cache lookup on line 999.</li>
+  <li><strong><code>err</code> variable scoping:</strong> <code>:=</code> at line 272 introduces <code>labelsCache</code> and <code>err</code>, then <code>err =</code> at line 315 correctly reuses it. No shadowing issue.</li>
+  <li><strong>Log level change:</strong> Info to Debug for cached runs is reasonable given ~80% of jobs hit this path.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>On the prefetch error path: is importing runs with empty labels preferable to skipping them? The old code skipped individual runs on BQ label failure. If labels are decorative (not used for routing or decisions), silent degradation is fine. If they drive downstream logic, the error handling should be louder or block processing.</li>
+</ul>
+
+</body>
+</html>
