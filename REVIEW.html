@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3651</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; border-bottom: 2px solid #0969da; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f0f3f6; padding: 0.15em 0.35em; border-radius: 3px; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 0.92rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.5rem 0 0; }
+  .verdict { background: #dafbe1; border-left: 4px solid #1a7f37; padding: 0.8rem 1rem; border-radius: 4px; margin-bottom: 1.5rem; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3651</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3651">openshift/sippy#3651</a></dd>
+    <dt>Title:</dt><dd>[WIP] Add 14-day time bound to failed-tests matviews</dd>
+    <dt>Author:</dt><dd>mstaeble</dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Head SHA:</dt><dd><code>d6528a046cd4f01ad85228784a4ca55eaa0dafca</code></dd>
+    <dt>Reviewed:</dt><dd>2026-06-25T13:27:11Z</dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong>
+  <p>Correct, minimal change. The 15-day time bound on the matview SQL is safe because the only consumer never needs data older than 14 days, and even if custom date params are passed via the API, results outside the window are discarded by the join against the time-bounded <code>ByPeriod</code> map.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>WHERE pjrt.prow_job_run_timestamp &gt; (NOW - 15 days)</code> filter to the <code>prowJobFailedTestsMatView</code> SQL template in <code>pkg/db/views.go</code>.</li>
+  <li>This template backs both <code>prow_job_failed_tests_by_day_matview</code> and <code>prow_job_failed_tests_by_hour_matview</code>.</li>
+  <li>Previously these matviews scanned the entire <code>prow_job_run_tests</code> table with no time filter, taking ~3 minutes per refresh. The 15-day bound enables partition pruning, cutting refresh to ~1 minute.</li>
+  <li>Adds an explanatory comment at the consumer site (<code>pkg/api/job_analysis.go:112</code>) documenting the matview&rsquo;s time constraint.</li>
+  <li>Presented as a smaller alternative to PR #3647 which removes these matviews entirely.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>No findings. The change is correct and well-scoped.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>The <code>|||TIMENOW|||</code> placeholder substitution in <code>pkg/db/views.go:151,189</code> handles the new interval correctly &mdash; same mechanism used by all other matviews.</li>
+  <li>The only consumer (<code>PrintJobAnalysisJSONFromDB</code>) uses a 14-day default window. Custom <code>start</code>/<code>end</code> params can be passed via the HTTP API, but the matview results are joined against <code>results.ByPeriod</code> (populated from the time-bounded <code>sumResults</code> query) &mdash; data outside the window is discarded by the <code>if _, ok</code> check at <code>job_analysis.go:123</code>.</li>
+  <li>The 15-day interval (14 + 1 buffer) is consistent with the pattern used by <code>testAnalysisByJobMatView</code> at <code>views.go:419</code>.</li>
+  <li>No other consumers of these matviews exist outside <code>PrintJobAnalysisJSONFromDB</code>.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The PR is marked WIP with a <code>do-not-merge/work-in-progress</code> label, and the description mentions PR #3647 as an alternative that removes the matviews entirely. Is there a decision on which approach the team prefers, or is this intentionally offered as a lower-risk option to land first?</li>
+</ul>
+
+</body>
+</html>
