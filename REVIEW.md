@@ -7,7 +7,7 @@ reviewed_at: 2026-06-25T13:24:19Z
 verdict: request-changes
 gate:
   decision: hold
-  gated_at: 2026-06-25T13:26:25Z
+  gated_at: 2026-06-25T13:34:00Z
   gated_head_sha: 23f283ff45acde57208061fc51e47c79f5d5516d
   reviewed_head_sha: 23f283ff45acde57208061fc51e47c79f5d5516d
 ---
