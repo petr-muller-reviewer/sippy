@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3679</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 24px; background: #f9f9f9; }
+  .container { max-width: 900px; margin: 0 auto; background: white; padding: 32px 40px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  h1 { font-size: 1.5rem; margin-top: 0; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; margin-top: 2rem; }
+  h3 { font-size: 1rem; margin-bottom: 4px; }
+  code, pre { font-family: "SFMono-Regular", Consolas, monospace; background: #f4f4f4; border-radius: 4px; }
+  code { font-size: .88em; padding: 1px 5px; }
+  pre { padding: 12px 16px; overflow-x: auto; font-size: .85em; line-height: 1.5; border: 1px solid #e0e0e0; }
+  .meta { background: #f0f4ff; border-left: 4px solid #4a7ef5; padding: 12px 16px; border-radius: 4px; margin-bottom: 24px; font-size: .9rem; }
+  .meta a { color: #2a5fd4; }
+  .verdict { padding: 14px 18px; border-radius: 6px; margin-bottom: 24px; }
+  .verdict.request-changes { background: #fff3f0; border-left: 4px solid #e05252; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; font-size: .8rem; letter-spacing: .05em; margin-bottom: 4px; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 18px; overflow: hidden; }
+  .finding-header { padding: 10px 14px; display: flex; align-items: baseline; gap: 10px; }
+  .finding-body { padding: 10px 14px; border-top: 1px solid #e8e8e8; }
+  .badge { font-size: .75rem; font-weight: 700; padding: 2px 8px; border-radius: 12px; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+  .badge.should-fix { background: #fff0c0; color: #7a5a00; }
+  .badge.nit { background: #e8f5e9; color: #2e7d32; }
+  .badge.question { background: #e8f0ff; color: #2a4fa0; }
+  .finding-title { font-weight: 600; font-size: .97rem; }
+  .where { font-size: .85rem; color: #555; margin-bottom: 8px; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin-bottom: 4px; }
+  .checked-list li::marker { content: "✓  "; color: #2e7d32; }
+  .section-note { font-size: .88rem; color: #666; margin-top: -8px; margin-bottom: 12px; }
+  hl { background: #fff3a3; }
+  .gate { padding: 14px 18px; border-radius: 6px; margin-bottom: 24px; }
+  .gate.hold { background: #fffbea; border-left: 4px solid #c8900a; }
+  .gate-label { font-weight: 700; text-transform: uppercase; font-size: .8rem; letter-spacing: .05em; margin-bottom: 4px; color: #7a5500; }
+  .gate h3 { font-size: .95rem; margin: 12px 0 4px; }
+  .gate ul { margin: 4px 0; }
+  .gate-ts { font-size: .8rem; color: #888; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="meta">
+  <strong>openshift/sippy#3679</strong> &nbsp;·&nbsp;
+  <a href="https://github.com/openshift/sippy/pull/3679" target="_blank">Move release metadata from BigQuery to PostgreSQL</a><br>
+  Head: <code>23f283ff45acde57208061fc51e47c79f5d5516d</code> &nbsp;·&nbsp;
+  Base: <code>main</code> &nbsp;·&nbsp;
+  Reviewed: <code>2026-06-25T13:24:19Z</code>
+</div>
+
+<h1>PR Review: Move release metadata from BigQuery to PostgreSQL</h1>
+
+<div class="gate hold">
+  <div class="gate-label">Gate decision: Hold</div>
+  <p>No new commits since the local review (HEAD is <code>23f283ff</code>). Both <code>should-fix</code> findings are unaddressed. The PR also lacks <code>lgtm</code> and <code>approve</code> labels; CI state is <code>UNSTABLE</code>.</p>
+
+  <h3>Findings disposition</h3>
+  <ul>
+    <li><code>cmd/sippy/load.go:173</code> — <strong>not addressed</strong>: <code>releaseConfigs, _ = api.GetReleasesFromDB(...)</code> — silent error discard still present. Any DB error during load silently delivers an empty release list to all downstream loaders.</li>
+    <li><code>cmd/sippy/seed_data.go:495</code> — <strong>not addressed</strong>: <code>FirstOrCreate</code> instead of upsert — re-seeding after any value change leaves stale data silently.</li>
+    <li><code>pkg/sippyserver/server.go:195</code> — <strong>addressed-by-discussion</strong>: sosiouxme raised the removed Redis cache; author replied with compelling rationale (7ms PG query vs. 50-200ms HTTP overhead, transitional callers). Borderline — reviewer did not follow up with <code>/lgtm</code>.</li>
+  </ul>
+
+  <h3>Merge risk</h3>
+  <ul>
+    <li><strong>Default loader list</strong> (<code>cmd/sippy/load.go:104</code>): <code>release-definitions</code> is now first in the default <code>--loader</code> list. Invocations without explicit <code>--loader</code> flags now hard-fail if BQ is unavailable (<code>CRITICAL error</code>), whereas previously BQ-absent deployments could still run the default set. Blast radius: deployments without BQ using default loader args.</li>
+    <li><strong>QueryReleases behavioral change</strong>: postgres provider previously derived the release list from <code>prow_jobs</code> (always self-consistent); now requires <code>release_definitions</code> to be pre-populated. Empty table returns <code>(nil, nil)</code> — callers receive no releases with no error.</li>
+    <li>No exported Go API surface changes, no CRD changes, no config schema changes beyond the loader default.</li>
+  </ul>
+
+  <h3>Gating list</h3>
+  <ul>
+    <li><code>cmd/sippy/load.go:173</code> — silent error discard (should-fix, REVIEW.md) — unaddressed</li>
+    <li><code>cmd/sippy/seed_data.go:495</code> — FirstOrCreate vs. upsert (should-fix, REVIEW.md) — unaddressed</li>
+    <li>Missing <code>lgtm</code> / <code>approve</code> labels (process)</li>
+  </ul>
+
+  <div class="gate-ts">Gated at 2026-06-25T13:26:25Z · head 23f283ff45acde57208061fc51e47c79f5d5516d</div>
+</div>
+
+<div class="verdict request-changes">
+  <div class="verdict-label">Request Changes</div>
+  One silent error discard and a FirstOrCreate/upsert inconsistency in seed data both warrant fixes before merge. The rest of the findings are nits or questions that can be addressed at the author's discretion. The core approach — syncing BQ release rows into PG and wiring the server/provider to read from there — is sound and the staging verification is thorough.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces a <code>release_definitions</code> PostgreSQL table to store release metadata (GA dates, dev start, capabilities, product, status) previously only in BigQuery.</li>
+  <li>Adds a <code>release-definitions</code> loader that fetches release rows from BQ and upserts them into <code>release_definitions</code> during the data load cycle.</li>
+  <li>Replaces the hardcoded <code>releaseMetadata</code> map in the postgres data provider with a live query against <code>release_definitions</code>.</li>
+  <li>Updates <code>Server.getReleases</code> to prefer PG and fall back to BQ when PG is empty or errors.</li>
+  <li>Seeds release definitions for the dev database (4.19–4.22) with relative GA dates and all capabilities.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<!-- SHOULD FIX -->
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge should-fix">Should fix</span>
+    <span class="finding-title">DB error silently discarded when reading <code>releaseConfigs</code></span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>cmd/sippy/load.go:173</code></div>
+    <p>The blank identifier <code>_</code> drops any error from <code>GetReleasesFromDB</code>. If the <code>release_definitions</code> table is missing (migration not applied), the DB is overloaded, or there is a schema mismatch, <code>releaseConfigs</code> stays an empty slice with no log, no warning, and no early exit. All downstream loaders that consume it — <code>prowLoader</code>, <code>releaseloader.New</code>, <code>featuregateloader.New</code>, the regression-cache loader, and <code>ensurePartitionsForReleases</code> — silently operate on an empty release list. The operator has no signal that the skip was due to an error rather than an intentional first-run empty state.</p>
+<pre><code>releaseConfigs := []sippyv1.Release{}
+if dbErr == nil {
+    releaseConfigs, <hl>_</hl> = api.GetReleasesFromDB(context.Background(), dbc)
+}</code></pre>
+    <p><strong>Fix:</strong> Log the error and either return early or propagate it so the operator knows why releases are absent.</p>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge should-fix">Should fix</span>
+    <span class="finding-title"><code>seedReleaseDefinitions</code> uses <code>FirstOrCreate</code> instead of upsert</span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>cmd/sippy/seed_data.go:495</code></div>
+    <p><code>FirstOrCreate</code> creates the row on the first seed run and silently does nothing thereafter. The sync loader (<code>releasedefloader</code>) correctly uses <code>clause.OnConflict</code> upsert. If a seed value changes — GA date offset, capabilities, product — re-seeding leaves stale data in the dev database with no error or warning. A developer adjusting, say, 4.21's <code>gaDays</code> and re-running seed will see "Seeded release definitions" in the log but no actual change in the DB.</p>
+<pre><code>if err := dbc.DB.Where("release = ?", release).FirstOrCreate(&amp;def).Error; err != nil {
+    return fmt.Errorf("failed to create release definition %s: %w", release, err)
+}</code></pre>
+    <p><strong>Fix:</strong> Use the same <code>clause.OnConflict</code> upsert pattern the sync loader uses, or at minimum document that re-seeding requires manually dropping the rows first.</p>
+  </div>
+</div>
+
+<!-- NITS -->
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge nit">Nit</span>
+    <span class="finding-title"><code>GetReleaseRowsFromBigQuery</code> duplicates <code>GetReleasesFromBigQuery</code> body</span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>pkg/api/releases.go:501–527</code></div>
+    <p>The new function copies the query string, client call, iterator loop, and all error-handling verbatim. The only difference is omitting <code>transformRelease</code>. The existing function could call the new one and map <code>transformRelease</code> over the result. Any future change to the BQ query path (ordering, label, error log text) must otherwise land in both places or one copy silently drifts.</p>
+<pre><code>// existing GetReleasesFromBigQuery — same queryString, same loop
+queryString := fmt.Sprintf("SELECT * FROM `%s` ORDER BY DevelStartDate DESC", client.ReleasesTable)
+q := client.Query(ctx, bqlabel.ReleaseAllReleases, queryString)
+// ... identical iterator pattern</code></pre>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge nit">Nit</span>
+    <span class="finding-title"><code>syncReleaseDefinitions</code> is non-transactional</span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>pkg/dataloader/releasedefloader/releasedefloader.go:60–73</code></div>
+    <p>Each upsert is a separate statement with no wrapping transaction. A mid-loop DB error leaves some rows updated and others not. This is recoverable on the next loader run, but during the window the table is inconsistent. Wrapping in a transaction gives atomic all-or-nothing semantics with no extra complexity.</p>
+<pre><code>for _, def := range defs {
+    err := dbc.DB.Clauses(clause.OnConflict{...}).Create(&amp;def).Error
+    if err != nil {
+        return fmt.Errorf("upserting release definition %s: %w", def.Release, err)
+    }
+}</code></pre>
+  </div>
+</div>
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge nit">Nit</span>
+    <span class="finding-title"><code>develStart</code> for in-development releases is an arbitrary relative date</span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>cmd/sippy/seed_data.go:479</code></div>
+    <p><code>develStart := now.AddDate(0, 0, m.gaDays-180)</code> computes development start as <code>now - 180 days</code> when <code>gaDays == 0</code> (e.g. 4.22). The value is semantically arbitrary and not tied to when development actually started. If <code>FirstOrCreate</code> is ever changed to upsert, this date will shift on each seed run. The comment documents <code>gaDays: 0 = no GA</code> but the effect on <code>develStart</code> is non-obvious.</p>
+<pre><code>develStart := now.AddDate(0, 0, m.gaDays-180)   // 4.22: now - 180 days</code></pre>
+  </div>
+</div>
+
+<!-- QUESTIONS -->
+
+<div class="finding">
+  <div class="finding-header">
+    <span class="badge question">Question</span>
+    <span class="finding-title">No log when PG returns empty without error and falls back to BQ</span>
+  </div>
+  <div class="finding-body">
+    <div class="where"><code>pkg/sippyserver/server.go:193–199</code></div>
+    <p>When <code>GetReleasesFromDB</code> returns <code>(nil, nil)</code> — empty table, no error — the code silently falls through to BQ. Only the error path emits a <code>Warn</code>. During first-boot or a post-wipe scenario an operator monitoring logs sees no indication the BQ fallback is active. Is this intentional? A <code>log.Info("release_definitions empty, falling back to BigQuery")</code> would make the bootstrapping path visible.</p>
+<pre><code>releases, err := api.GetReleasesFromDB(ctx, s.db)
+if err == nil &amp;&amp; len(releases) > 0 {
+    return releases, nil
+}
+if err != nil {
+    log.WithError(err).Warn("error querying releases from database, trying bigquery fallback")
+}
+// silent fallthrough to BQ when table is empty</code></pre>
+  </div>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked-list">
+  <li>Staging verification covered all key endpoints (<code>/api/releases</code>, <code>/api/releases/health</code>, <code>/api/component_readiness</code>) with 36 real releases synced from BQ.</li>
+  <li><code>forceRefresh</code> query parameter: the sippy-ng frontend does not reference it (grep returned empty), so dropping it from <code>getReleases</code> is safe.</li>
+  <li><code>QueryReleaseDates</code> ignoring request options by design — PG derives dates from actual <code>prow_job_runs</code> min/max timestamps, not filtered by options. The <code>_</code> parameter is intentional.</li>
+  <li><code>release-definitions</code> correctly placed first in <code>loaderOrder</code> so downstream loaders can rely on an up-to-date table within a single run.</li>
+  <li>BQ fallback in <code>getReleases</code> is reachable when PG is up but the table is empty — the flow correctly falls through the <code>err == nil &amp;&amp; len > 0</code> guard to the BQ branch.</li>
+  <li><code>DefinitionToRelease</code> uses <code>map[ReleaseCapability]bool</code> for capabilities — not a CLAUDE.md violation because this is the existing <code>sippyv1.Release</code> API type, not a hand-rolled set choice by this PR.</li>
+  <li>Migration: <code>ReleaseDefinition</code> added to <code>modelsToMigrate</code> slice before <code>ReleaseTag</code>, correct ordering.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Should <code>GetReleasesFromDB</code> return a sentinel error (or at least log) when the table exists but is empty, to distinguish "first run" from "DB problem"? Right now both cases look the same to callers.</li>
+  <li>The comment on the <code>releaseConfigs</code> read says "On the first run the table may be empty; the release-definitions loader will populate it for subsequent runs." But <code>release-definitions</code> is now first in the default loader list — so on the very first run, won't the loader populate the table before the prow/releases loaders consume <code>releaseConfigs</code>? If so, the comment and the empty-slice initialization may be unnecessary complexity (the table will always be populated by the time downstream loaders run).</li>
+</ul>
+
+</div>
+</body>
+</html>
