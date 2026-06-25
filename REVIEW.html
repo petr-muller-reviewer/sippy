@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3678</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.2rem 0 0; }
+  .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; }
+  .verdict.approve { background: #dafbe1; border-color: #aceebb; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.1em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; }
+  .severity.nit { background: #ddf4ff; color: #0969da; }
+  .severity.should-fix { background: #fff8c5; color: #9a6700; }
+  .severity.blocking { background: #ffebe9; color: #cf222e; }
+  .severity.question { background: #f6f8fa; color: #57606a; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: Add variant_combinations table for efficient matview grouping</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3678">openshift/sippy#3678</a></dd>
+    <dt>Head SHA:</dt><dd><code>c4936c469e2f06ff163858c0d02c2faa467e466e</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-06-25T13:35:22Z</dd>
+  </dl>
+</div>
+
+<div class="verdict approve">
+  <strong>Verdict: Approve.</strong>
+  Well-structured performance optimization with correct semantic equivalence. No correctness bugs found. Two minor nits, neither blocking.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Introduces a <code>variant_combinations</code> lookup table that assigns a serial integer ID to each unique <code>prow_jobs.variants</code> array.</li>
+  <li>A <code>BEFORE INSERT/UPDATE</code> trigger on <code>prow_jobs</code> auto-populates <code>variant_combination_id</code> via an upsert pattern.</li>
+  <li>Denormalizes <code>variant_combination_id</code> into <code>test_daily_summaries</code> so the matview can GROUP BY a single integer directly, eliminating the previous two-stage aggregation (per-job pre_agg, then per-variant-combo collapse with GROUP BY + SUM).</li>
+  <li>Simplifies the matview outer SELECT by removing GROUP BY and SUM (no longer needed since pre_agg already aggregates at variant_combination_id granularity).</li>
+  <li>Benchmarked at 56% faster matview refresh on staging (158s to 69s, 18K jobs, 45M daily summary rows).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity nit">nit</span> Down migration does not document GORM-managed table dependency</h3>
+<p><code>pkg/db/migrations/000003_create_variant_combinations.down.sql:1-2</code></p>
+<pre>DROP TRIGGER IF EXISTS trg_prow_jobs_variant_combination ON prow_jobs;
+DROP FUNCTION IF EXISTS set_variant_combination_id();</pre>
+<p>
+  The down migration drops only the trigger and function. The <code>variant_combinations</code> table and
+  <code>variant_combination_id</code> columns (on <code>prow_jobs</code> and <code>test_daily_summaries</code>)
+  are GORM-managed and survive rollback. If someone runs the down migration without reverting the Go code,
+  new prow_job inserts will not populate <code>variant_combination_id</code> (trigger gone), producing NULL
+  variants in new matview entries. A comment in the down migration noting this GORM dependency would prevent
+  confusion. Migration 000002 creates <code>test_daily_summaries</code> entirely in SQL and its down drops
+  the table; the split here is different by design but worth documenting.
+</p>
+
+<h3><span class="severity nit">nit</span> Backfill queries run unconditionally on every startup</h3>
+<p><code>pkg/db/db.go:565-576</code></p>
+<pre>INSERT INTO variant_combinations (variants)
+SELECT DISTINCT variants FROM prow_jobs
+WHERE variants IS NOT NULL AND variant_combination_id IS NULL
+ON CONFLICT (variants) DO NOTHING;
+
+UPDATE prow_jobs
+SET variant_combination_id = vc.id
+FROM variant_combinations vc
+WHERE prow_jobs.variants = vc.variants
+  AND prow_jobs.variants IS NOT NULL
+  AND prow_jobs.variant_combination_id IS NULL;</pre>
+<p>
+  These backfill queries execute on every startup even after the initial backfill when they return zero rows.
+  The cost is negligible (GORM auto-creates a btree FK index, and PostgreSQL btree indexes include NULLs,
+  so the <code>WHERE IS NULL</code> scan is fast). Wrapping the backfill in an <code>IF EXISTS</code> guard
+  like the truncate check that follows would make the "runs only once" intent clearer.
+</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>Matview semantic equivalence:</strong> pre_agg grouping by <code>variant_combination_id</code> instead of <code>prow_job_id</code> produces the same final result because variant_combination_id maps 1:1 to a variants array, and the old outer GROUP BY + SUM collapsed to this same granularity.</li>
+  <li><strong>Matview consumer queries:</strong> <code>vc.variants</code> aliases to <code>variants</code> in the materialized view output, so all existing queries in <code>test_queries.go</code> and <code>misc_queries.go</code> referencing <code>variants</code> on the matview continue to work.</li>
+  <li><strong>Trigger upsert pattern:</strong> <code>ON CONFLICT DO UPDATE SET variants = EXCLUDED.variants</code> with RETURNING is the standard PostgreSQL get-or-create pattern pre-PG19. <code>DO NOTHING</code> would return zero rows from RETURNING, so this is correct.</li>
+  <li><strong>GORM AutoMigrate ordering:</strong> <code>VariantCombination</code> is listed before <code>ProwJob</code> in the schema list, so the FK target table exists when GORM processes ProwJob.</li>
+  <li><strong>Collapsed matview:</strong> reads from the base matview which still has a <code>variants</code> column, so exclusion filters work unchanged.</li>
+  <li><strong>Window function partition:</strong> <code>PARTITION BY base.id, base.suite_name, base.release</code> is unchanged from before the PR.</li>
+  <li><strong>ON CONFLICT in daily summary insert:</strong> keyed on <code>(test_id, prow_job_id, suite_id, release, summary_date)</code>, same as before. <code>variant_combination_id</code> is an update-target column, not a conflict key.</li>
+  <li><strong>Denormalization staleness:</strong> if <code>prow_jobs.variants</code> changes, existing <code>test_daily_summaries</code> rows retain the old <code>variant_combination_id</code> until re-aggregated. This is not a regression; the old matview had equivalent staleness via the prow_jobs join.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The down migration drops only the trigger function (SQL-managed) while leaving the <code>variant_combinations</code> table and FK columns (GORM-managed). Migration 000002 creates <code>test_daily_summaries</code> entirely in SQL and its down drops the table. Was the split intentional here, or would it be cleaner to also create <code>variant_combinations</code> in the SQL migration for consistency?</li>
+  <li>Would it be worth adding an <code>IF EXISTS</code> guard around the backfill INSERT/UPDATE block (similar to the truncate guard) to make the "runs only once" intent explicit?</li>
+</ul>
+
+</body>
+</html>
