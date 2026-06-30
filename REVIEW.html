@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3698</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #24292f; }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.9em; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.2rem 0 0; }
+  .verdict { padding: 0.6rem 1rem; border-radius: 6px; margin: 1rem 0; font-weight: 600; }
+  .verdict.approve { background: #dafbe1; border: 1px solid #56d364; }
+  .severity { display: inline-block; font-size: 0.75em; font-weight: 700; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4rem; vertical-align: middle; }
+  .severity.nit { background: #ddf4ff; color: #0969da; }
+  .severity.should-fix { background: #fff8c5; color: #9a6700; }
+  .severity.blocking { background: #ffebe9; color: #cf222e; }
+  .severity.question { background: #f0e6ff; color: #6639ba; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3698</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3698">openshift/sippy#3698</a></dd>
+    <dt>Title:</dt><dd>Use variant_combinations for query filtering and drop GIN index</dd>
+    <dt>Head SHA:</dt><dd><code>5d890c93462e80f1cd115a52a219fe8384d28be3</code></dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Reviewed:</dt><dd>2026-06-30T10:11:42Z</dd>
+  </dl>
+</div>
+
+<div class="verdict approve">Approve</div>
+<p>
+  Well-scoped performance optimization with strong benchmark evidence (2x-21x speedups). All query rewrites are semantically equivalent to the originals, with one intentional NULL-handling change that is explicitly justified. No correctness bugs found after verification. Two minor cleanup observations noted below.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Rewrites all variant-based WHERE clauses to look up <code>variant_combination_id</code> against the small <code>variant_combinations</code> table (~2K rows) instead of running array containment checks on large tables.</li>
+  <li>Drops the GIN index on <code>prow_jobs.variants</code> (migration 000004) since no query uses array operators on that column anymore.</li>
+  <li>Removes the GIN index tag from the GORM model struct so AutoMigrate stays consistent.</li>
+  <li>Rewrites <code>PlatformInfraSuccess</code> to join matview rows to <code>variant_combinations</code> via integer ID instead of unnesting the matview's own variants array.</li>
+  <li>Converts <code>buildCollapsedMatViewSQL</code> from per-variant NOT clauses to a single array overlap check against <code>variant_combinations</code>.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity nit">nit</span> Identical excluded_vc CTE duplicated in two functions</h3>
+<p><code>pkg/db/query/test_queries.go:116,175</code></p>
+<pre>WITH excluded_vc AS (
+    SELECT id FROM variant_combinations WHERE @excluded && variants
+),</pre>
+<p>This CTE appears identically in <code>TestReportsByVariant</code> and <code>TestReportExcludeVariants</code>. If the exclusion logic ever needs refinement, both must be updated in lockstep. A shared constant or helper would reduce that risk, but it is not blocking.</p>
+
+<h3><span class="severity nit">nit</span> Same variant subquery pattern repeated across 6 call sites</h3>
+<p><code>pkg/api/test_analysis.go:59,63,125,129</code> and <code>pkg/db/query/test_queries.go:271,275,304,308</code></p>
+<pre>jq = jq.Where("prow_jobs.variant_combination_id NOT IN "+
+    "(SELECT id FROM variant_combinations WHERE ? = any(variants))", bv)</pre>
+<p>Each blocked/allowed variant appends an individual WHERE clause with the same subquery template. A shared GORM scope (e.g., <code>WithVariantFilter(q, included, excluded)</code>) would centralize the pattern. Current form is correct and readable.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li><strong>NULL handling with NOT IN:</strong> The old pattern <code>NOT(variants is not null and @excluded && variants)</code> included NULL-variant rows; the new <code>NOT IN</code> excludes them. The PR description explicitly addresses this: the trigger ensures <code>variant_combination_id</code> is NULL only when <code>variants</code> is NULL, staging confirms zero matview rows have NULL, and such rows carry no meaningful data.</li>
+  <li><strong>PlatformInfraSuccess double-counting:</strong> Variant assignment uses a map key (<code>VariantPlatform</code>), so only one Platform variant per job is possible. The old query also used <code>unnest</code>, so behavior is equivalent.</li>
+  <li><strong>GIN index drop safety:</strong> Remaining <code>unnest(prow_jobs.variants)</code> queries are unaffected because GIN indexes do not help <code>unnest()</code>. The <code>&&</code> operator is now only used against <code>variant_combinations</code> (a different, small table).</li>
+  <li><strong>Per-variant subquery efficiency:</strong> N is typically small (~2 variants). Batching into <code>&&</code> would change AND-to-OR semantics for inclusion filters, so separate subqueries are the correct form.</li>
+  <li><strong>Migration 000004 up/down:</strong> Correct <code>DROP INDEX IF EXISTS</code> / <code>CREATE INDEX IF NOT EXISTS</code> pair.</li>
+  <li><strong>GORM model tag removal:</strong> <code>prow.go</code> tag change matches the migration.</li>
+  <li><strong>SQL injection in buildCollapsedMatViewSQL:</strong> <code>CollapsedVariantExclusions</code> is a hardcoded <code>[]string</code> literal, not user input. Manual quoting is safe.</li>
+  <li><strong>PlatformInfraSuccess mixed interpolation:</strong> <code>table</code> comes from a controlled switch on <code>period</code>, not user input. <code>sql.Named</code> for the other params is correct.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The <code>NOT IN</code> pattern silently drops rows with NULL <code>variant_combination_id</code>. Would it be worth adding a <code>NOT NULL</code> constraint on <code>variant_combination_id</code> in the matview definitions (or a CHECK on the underlying tables) to make this invariant explicit rather than relying on the trigger?</li>
+</ul>
+
+</body>
+</html>
