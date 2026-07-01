@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3719</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 52em; margin: 2em auto; padding: 0 1em; color: #24292f; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid #d0d7de; padding-bottom: .3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: .2em; }
+  code { font-family: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: .15em .3em; border-radius: 3px; }
+  a { color: #0969da; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5em; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.5em 0 .3em; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: .6em 1em; margin: 1em 0; border-radius: 4px; }
+  ul { padding-left: 1.5em; }
+  li { margin-bottom: .3em; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3719</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3719">openshift/sippy#3719</a></dd>
+    <dt>Title:</dt><dd>Return average prow job runtime over current/prev weeks</dd>
+    <dt>Author:</dt><dd>dgoodwin</dd>
+    <dt>Base:</dt><dd>main</dd>
+    <dt>Head SHA:</dt><dd><code>5e4b91173b6f451679b000438edb66f2b2457a51</code></dd>
+    <dt>Reviewed:</dt><dd>2026-07-01T12:13:49Z</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Verdict: Approve.</strong> Small, clean, additive change that follows existing patterns. No correctness issues found.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds two new fields to the <code>Job</code> struct: <code>CurrentAverageDurationMinutes</code> and <code>PreviousAverageDurationMinutes</code> (both <code>int</code>).</li>
+  <li>Extends the <code>job_results</code> PostgreSQL function to compute average job run duration (in minutes) for both the current and previous time windows, using <code>AVG()</code> with <code>CASE WHEN</code> timestamp filters.</li>
+  <li>Converts nanosecond-stored durations to minutes by dividing by 60e9.</li>
+  <li>Registers both fields in <code>GetNumericalValue</code> so they can be queried as numerical parameters.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>No findings. Nothing survived verification.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><strong>AVG correctness with LEFT JOIN to bug_jobs:</strong> The join is on <code>prow_jobs.id</code>, so all runs of a given job are multiplied by the same factor (number of bug associations). This preserves AVG correctness, unlike a join that would multiply runs unevenly.</li>
+  <li><strong>Nanosecond-to-minutes divisor:</strong> <code>60000000000.0</code> = 60e9 ns = 1 minute. Correct for Go's <code>time.Duration</code> (int64 nanoseconds).</li>
+  <li><strong>coalesce(..., 0) for NULL averages:</strong> Consistent with all other aggregates in the same query. The Go field is <code>int</code> (not <code>*int</code>), so NULL would map to 0 regardless.</li>
+  <li><strong>RETURNS TABLE signature and outer SELECT:</strong> Both updated to include the two new columns.</li>
+  <li><strong>Cross-file impact:</strong> GORM scans by struct tag name, not column position. No explicit column enumeration elsewhere that would break.</li>
+  <li><strong>BigQuery parity:</strong> <code>job_results</code> is a PostgreSQL-only aggregation function with no BigQuery equivalent. The CLAUDE.md parity rule does not apply here.</li>
+  <li><strong>GetNumericalValue:</strong> Both new param names added, converting <code>int</code> to <code>float64</code> correctly.</li>
+  <li><strong>JSON tags:</strong> Match SQL column names exactly.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The fields use <code>int</code> (not <code>*int</code>), so jobs with zero runs in a period show <code>0</code> minutes rather than <code>null</code> in JSON. This is consistent with how other zero-value fields behave in this struct, but worth confirming you're comfortable with that for duration specifically: 0 minutes is a meaningful value (a very fast job), unlike 0 passes which unambiguously means "no data."</li>
+</ul>
+
+</body>
+</html>
