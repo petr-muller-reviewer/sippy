@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3722</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    background: #fff;
+  }
+  h1 { font-size: 1.4rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; }
+  code { background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1.5rem; font-size: 0.92em; }
+  .meta a { color: #0969da; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin: 0 1.2rem 0 0; }
+  .verdict { padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+  .verdict.approve { background: #dafbe1; border: 1px solid #56d364; }
+  .verdict.request-changes { background: #fff8c5; border: 1px solid #d4a72c; }
+  .severity { display: inline-block; font-size: 0.78em; font-weight: 600; text-transform: uppercase; padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.4em; vertical-align: middle; }
+  .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.question { background: #ddf4ff; color: #0550ae; }
+  .severity.nit { background: #f6f8fa; color: #57606a; }
+  .severity.blocking { background: #ffebe9; color: #82071e; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: 0.3em; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3722</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3722">openshift/sippy#3722</a></dd>
+    <dt>Title:</dt><dd>TRT-2741: Expand variant keys and decouple daily summaries from variant_combination_id</dd>
+    <dt>Head SHA:</dt><dd><code>fa1cbef53a79e54b095bf12e534955924b8b270e</code></dd>
+    <dt>Base:</dt><dd><code>main</code></dd>
+    <dt>Reviewed:</dt><dd>2026-07-03T12:29:03Z</dd>
+  </dl>
+</div>
+
+<div class="verdict approve">
+  <strong>Verdict: Approve</strong> &mdash; Well-structured change with thorough benchmarking. One parity concern worth discussing, no blocking issues.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Drops <code>variant_combination_id</code> from <code>test_daily_summaries</code> and resolves it at matview refresh time via JOIN to <code>prow_jobs</code>, fixing 49% stale variant associations.</li>
+  <li>Removes the <code>prow_jobs</code> JOIN from the daily summary INSERT query, making writes faster (single-table aggregation).</li>
+  <li>Adds 8 new variant keys to <code>importantVariants</code> (Procedure, Aggregation, NetworkAccess, Scheduler, Suite, ContainerRuntime, CGroupMode, LayeredProduct).</li>
+  <li>Introduces a migration <code>MANIFEST</code> file and <code>make verify-migrations</code> CI target to prevent concurrent PRs from silently merging duplicate migration version numbers.</li>
+  <li>Removes the <code>TRUNCATE test_daily_summaries</code> from <code>ensureVariantCombinationTrigger</code> since the column no longer exists.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity should-fix">should-fix</span> Postgres provider fieldMap parity gap widened by new variant keys</h3>
+<p><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:253-262</code></p>
+<pre>fieldMap := map[string]string{
+    "platform": "Platform",
+    "network":  "Network",
+    "arch":     "Architecture",
+    "upgrade":  "Upgrade",
+}
+variantKey, ok := fieldMap[field]
+if !ok {
+    return []string{}, nil
+}</pre>
+<p>
+  The Postgres provider's <code>QueryUniqueVariantValues</code> hard-codes only 4 legacy variant keys. Any other field silently returns an empty slice. The BigQuery provider handles all variant keys dynamically via <code>UNNEST</code>. This gap predates the PR, but adding 8 new keys to <code>importantVariants</code> widens the discrepancy. CLAUDE.md requires parity between data providers.
+</p>
+
+<h3><span class="severity question">question</span> Down migration truncates daily summaries instead of backfilling</h3>
+<p><code>pkg/db/migrations/000004_drop_daily_summary_variant_combination.down.sql:1-2</code></p>
+<pre>TRUNCATE test_daily_summaries;
+ALTER TABLE test_daily_summaries ADD COLUMN IF NOT EXISTS variant_combination_id BIGINT;</pre>
+<p>
+  Rolling back destroys all daily summary data, requiring a full rebuild (hours). Since <code>prow_job_id</code> remains in the table and <code>prow_jobs.variant_combination_id</code> is intact, a backfill <code>UPDATE</code> could preserve data. The PR description acknowledges this tradeoff explicitly. Worth confirming this is the preferred approach over a slower but non-destructive rollback.
+</p>
+
+<h2>Things I checked and found no issues</h2>
+<ul class="checked">
+  <li><strong>pre_agg CTE correctness:</strong> JOIN and GROUP BY produce the same aggregation as the old design, just resolving <code>variant_combination_id</code> from <code>prow_jobs</code> at refresh time instead of from the stored column.</li>
+  <li><strong>Daily summary INSERT SQL:</strong> <code>variant_combination_id</code> removed from SELECT list, GROUP BY, and <code>valueColumns</code> in lockstep; no orphaned references.</li>
+  <li><strong>Migration 000004 up:</strong> Drops all 4 dependent matviews before the column drop; they are recreated by <code>syncPostgresMaterializedViews</code> on next startup.</li>
+  <li><strong>MANIFEST mechanism:</strong> Genuinely prevents silent merge of duplicate migration versions. golang-migrate only detects collisions at runtime (too late); the MANIFEST forces a git merge conflict.</li>
+  <li><strong>verify-migrations.sh edge cases:</strong> Handles empty lines, comments, and zero-padded numbers correctly. The <code>continue</code> on line 24 guards the arithmetic comparison from empty strings.</li>
+  <li><strong>Retroactive variant resolution:</strong> Intentional design choice. Using current <code>prow_jobs.variants</code> at refresh time fixes the 49% stale data problem described in the PR.</li>
+  <li><strong>ensureVariantCombinationTrigger:</strong> TRUNCATE removal is correct since the column no longer exists after migration 000004.</li>
+  <li><strong>TestDailySummary struct:</strong> Field removal matches migration and SQL changes. No remaining references to <code>test_daily_summaries.variant_combination_id</code> in the codebase.</li>
+  <li><strong>No cross-file breakage:</strong> All callers of changed functions, all references to removed fields traced; no orphaned usage found.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>The <code>fieldMap</code> parity gap in the Postgres provider predates this PR. Is fixing it in scope here, or should it be tracked as a follow-up?</li>
+  <li>Is the <code>TRUNCATE</code> in the down migration a deliberate choice for rollback speed, or would a backfill-based rollback (slower but data-preserving) be acceptable?</li>
+</ul>
+
+</body>
+</html>
