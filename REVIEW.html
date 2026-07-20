@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: openshift/sippy#3728</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; background: #fff; padding: 2rem; }
+  .container { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.4rem; }
+  p, li { margin-bottom: 0.4rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.875em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; margin: 0.5rem 0 1rem; }
+  pre code { background: none; padding: 0; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dd { display: inline; margin-right: 1.5rem; }
+  .verdict { background: #dafbe1; border-left: 4px solid #2da44e; padding: 0.75rem 1rem; border-radius: 0 6px 6px 0; margin-bottom: 1.5rem; }
+  .verdict.request-changes { background: #fff8c5; border-left-color: #bf8700; }
+  .finding { border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .finding.should-fix { border-left: 4px solid #bf8700; }
+  .finding.nit { border-left: 4px solid #57606a; }
+  .finding.blocking { border-left: 4px solid #cf222e; }
+  .finding.question { border-left: 4px solid #0969da; }
+  .severity { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+  .severity.should-fix { color: #bf8700; }
+  .severity.nit { color: #57606a; }
+  .severity.blocking { color: #cf222e; }
+  .severity.question { color: #0969da; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Review: TRT-2768: Import /payload job results from PRs into postgres</h1>
+<div class="meta">
+  <dl>
+    <dt>PR:</dt><dd><a href="https://github.com/openshift/sippy/pull/3728">openshift/sippy#3728</a></dd>
+    <dt>Head SHA:</dt><dd><code>ee1291b1526abda5275063f597dcb4e98ae739f9</code></dd>
+    <dt>Base:</dt><dd><code>main</code></dd>
+    <dt>Reviewed:</dt><dd>2026-07-20T15:27:45Z</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Approve.</strong>
+  Solid migration from BigQuery to PostgreSQL for the PR test results endpoint, with well-structured /payload sub-job transformation and good e2e coverage. Since the previous pass, the author resolved every should-fix from this review plus feedback from a human reviewer and CodeRabbit (magic-string constant, missing indexes/soft-delete guards, result limit, include_successes flake bug, latest_sha_only semantics). One should-fix remains (API docs), nothing blocking.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Detects /payload sub-jobs (via <code>releaseJobName</code> annotation) during BigQuery import and transforms them into presubmit-style records: stabilizes the job name by stripping the PR number, sets type to <code>presubmit</code>, routes to the <code>Presubmits</code> pseudorelease (now <code>models.ReleasePresubmits</code>).</li>
+  <li>Ports <code>/api/pull_requests/test_results</code> from BigQuery to PostgreSQL. Removes the BQ client dependency, changes response schema (<code>status</code> string replaces <code>success</code>/<code>flaked</code> booleans, <code>output</code> replaces <code>failure_content</code>).</li>
+  <li>Makes <code>start_date</code>/<code>end_date</code> optional (default: last 14 days), adds a <code>latest_sha_only</code> filter and a capped <code>limit</code> param, and removes the 30-day max range limit.</li>
+  <li>Adds synthetic presubmit seed data (<code>seedPresubmitData</code>) and comprehensive e2e tests for the endpoint, including a competing-SHA scenario for <code>latest_sha_only</code>.</li>
+  <li>Uses <code>releaseJobName</code> for variant identification on /payload jobs, overrides the release variant to the Presubmits pseudorelease, and suppresses TestGrid URL generation for these jobs.</li>
+</ul>
+
+<h3 style="margin-top:1.5rem; font-size:1rem; color:#57606a;">Since previous review (d5763a01 → ee1291b15)</h3>
+<ul>
+  <li>Introduced <code>models.ReleasePresubmits</code> constant and a <code>ReleaseDefinition</code> model with <code>CapPullRequests</code>, replacing hardcoded <code>"Presubmits"</code> strings across the codebase.</li>
+  <li>Added soft-delete guards, partition-aware JOIN conditions, and two new indexes (<code>ProwPullRequest(org,repo,number)</code>, <code>prow_job_run_prow_pull_requests(prow_pull_request_id)</code>) addressing a human reviewer's performance findings.</li>
+  <li>Added a result limit (default/cap 10,000), fixed a follow-up crash where the <code>limit</code> param wasn't in the validation allowlist.</li>
+  <li>Fixed <code>include_successes</code> to exclude flakes, matching old BigQuery behavior.</li>
+  <li>Replaced the <code>sha</code> param with <code>latest_sha_only</code>, and updated seed data to link a second, older SHA so the filter is actually exercised by tests.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <div class="severity should-fix">Should fix</div>
+  <strong>API endpoint modified but <code>pkg/api/README.md</code> not updated</strong><br>
+  <code>pkg/api/prtestresults.go</code> (whole file), <code>pkg/api/README.md</code> (untouched)
+  <p>CLAUDE.md requires: "When API endpoints are added, removed, or modified, update <code>pkg/api/README.md</code>." This endpoint's response schema changed substantially (removed <code>prowjob_build_id</code>, <code>success</code>, <code>flaked</code>, <code>failure_content</code>; added <code>prow_job_run_id</code>, <code>status</code>, <code>output</code>), parameters changed (<code>sha</code> → <code>latest_sha_only</code>, <code>limit</code> added), and the data source switched from BigQuery to PostgreSQL. Still not reflected in the README as of <code>ee1291b15</code>.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <div class="severity nit">Nit</div>
+  <strong>No query-time deduplication for cross-suite test duplicates</strong><br>
+  <code>pkg/api/prtestresults.go:58-110</code>
+  <p>If the same test name appears in multiple suites within one job run, both rows are returned. The old BigQuery code had the same limitation (its <code>ROW_NUMBER</code> partitioned by <code>testsuite</code>), so this is not a regression. Noting for awareness in case cross-suite duplicates are a real concern for downstream consumers.</p>
+</div>
+
+<h2>Resolved since previous review</h2>
+
+<div class="finding should-fix">
+  <div class="severity should-fix">Resolved</div>
+  <strong>"Presubmits" hardcoded across 34 locations with no shared constant</strong>
+  <p>Commit <code>cb70960bb</code> ("Use a Presubmits release in database and consts") introduced <code>models.ReleasePresubmits</code> and replaced hardcoded strings throughout <code>pkg/api/prtestresults.go</code>, <code>pkg/dataloader/prowloader/prow.go</code>, <code>pkg/variantregistry/ocp.go</code>, <code>pkg/api/job_runs.go</code>, and <code>cmd/sippy/seed_data.go</code>. A new <code>ReleaseDefinition</code> model with a <code>CapPullRequests</code> capability was also added, addressing a human reviewer's separate comment about coordinating with PR #3679's release-definitions infrastructure.</p>
+</div>
+
+<div class="finding should-fix">
+  <div class="severity should-fix">Resolved (reviewer: mstaeble)</div>
+  <strong>Missing indexes and soft-delete guards on the PG query</strong>
+  <p>Commits <code>76cc3bdad</code> (partition filters + soft-delete guards), <code>ed84adb65</code> (composite index on <code>ProwPullRequest(org, repo, number)</code>), <code>376bf6c1e</code> (index on <code>prow_job_run_prow_pull_requests(prow_pull_request_id)</code>). The JOIN on <code>prow_job_run_prow_pull_requests</code> now includes the release and timestamp bounds so the existing composite index applies, and <code>deleted_at IS NULL</code> guards were added for the three soft-deletable tables.</p>
+</div>
+
+<div class="finding should-fix">
+  <div class="severity should-fix">Resolved (reviewer: mstaeble / CodeRabbit)</div>
+  <strong>No result limit or pagination</strong>
+  <p>Commit <code>bbc381f18</code> added a <code>limit</code> param (default/cap 10,000); commit <code>5662a6bbc</code> fixed a follow-up crash where <code>limit</code> wasn't in the param validation allowlist.</p>
+</div>
+
+<div class="finding nit">
+  <div class="severity nit">Resolved (reviewer: mstaeble)</div>
+  <strong>include_successes returned flakes, diverging from old BQ behavior</strong>
+  <p>Commit <code>dd24908e7</code> restricts the successes branch to <code>status = TestStatusSuccess</code> only. E2e test updated to assert zero flakes in the response.</p>
+</div>
+
+<div class="finding question">
+  <div class="severity question">Resolved (reviewer: mstaeble)</div>
+  <strong>SHA filter semantics</strong>
+  <p>Commit <code>0312ea604</code> replaced the <code>sha</code> param with <code>latest_sha_only</code>. Seed data now links a second, older SHA to PR 99001's earliest run so the filter is actually exercised (CodeRabbit had flagged that every seeded run previously shared one SHA, making the filter test a no-op).</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li><code>includeSuccesses</code> filter now correctly excludes flakes, matching old BQ semantics; validated by e2e test.</li>
+  <li>/payload sub-job name stabilization: <code>strings.Replace</code> with PR-number prefix, fallback to <code>payload-pr-</code> + releaseJobName. Unchanged since last review.</li>
+  <li>Variant override in <code>createOrUpdateProwJob</code>: replaces first release-matching variant with <code>models.ReleasePresubmits</code>, clears TestGridURL for payload presubmits. Correct for the single-release-variant case.</li>
+  <li><code>processProwJob</code> ordering: /payload early-return before synthetic release check is correct.</li>
+  <li>Endpoint capability change from <code>ComponentReadinessCapability</code> to <code>LocalDBCapability</code>: correct for PG-backed endpoint.</li>
+  <li>New <code>limit</code> param wired through <code>param.SafeRead</code>'s allowlist after the crash fix; on a parse error the handler silently falls back to the default rather than returning 400 (CodeRabbit raised this — not addressed, low severity given the safe default).</li>
+  <li>E2e tests: cover default failures, include_successes (successes only), multi-PR isolation, latest_sha_only with competing SHAs, default date range, missing params, and empty results.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>CodeRabbit suggested returning HTTP 400 for malformed/out-of-range <code>limit</code> values instead of silently defaulting. Worth a follow-up if strict validation matters here, otherwise fine as-is.</li>
+  <li>The 30-day max date range guard was removed. Is there any concern about very large date ranges against PostgreSQL, or does partition pruning make that safe enough?</li>
+</ul>
+
+</div>
+</body>
+</html>
