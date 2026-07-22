@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3806</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fdfdfd;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  code, pre {
+    font-family: "SF Mono", "Fira Code", Consolas, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  h2 {
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 0.3rem;
+  }
+  .verdict {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.3em 0.8em;
+    border-radius: 6px;
+    margin-bottom: 0.6rem;
+  }
+  .verdict.request-changes { background: #fde2e2; color: #8a1f1f; }
+  .verdict.approve { background: #e2fde5; color: #1f6b2a; }
+  .verdict.needs-discussion { background: #fff3cd; color: #7a5c00; }
+  .finding {
+    border: 1px solid #ddd;
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.1rem;
+    background: #fff;
+  }
+  .finding.blocking { border-left-color: #c0392b; }
+  .finding.should-fix { border-left-color: #d68910; }
+  .finding.nit { border-left-color: #7f8c8d; }
+  .finding.question { border-left-color: #2980b9; }
+  .badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+  }
+  .badge.blocking { background: #c0392b; color: #fff; }
+  .badge.should-fix { background: #d68910; color: #fff; }
+  .badge.nit { background: #7f8c8d; color: #fff; }
+  .badge.question { background: #2980b9; color: #fff; }
+  .finding h3 { margin: 0 0 0.4rem 0; display: inline; font-size: 1.02rem; }
+  .loc { color: #555; margin: 0.3rem 0; }
+  ul.tight li { margin-bottom: 0.4rem; }
+  .hl { background: #fff2ac; padding: 0 0.1em; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: TRT-2787: Migrate sippy-ng from Create React App to Vite</h1>
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3806">openshift/sippy#3806</a></dd>
+    <dt>Head SHA</dt><dd><code class="inline">c4cbe7a7ab95992ccc8f2322c8ea1cd02904e2db</code></dd>
+    <dt>Base</dt><dd><code class="inline">main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-22T14:55:15Z</dd>
+  </dl>
+</header>
+
+<section>
+  <h2>Verdict</h2>
+  <span class="verdict request-changes">Request changes</span>
+  <p>The toolchain migration itself (CRA/webpack &rarr; Vite, Jest &rarr; Vitest) is clean, mechanically verified
+  (tests pass, build succeeds), and low-risk &mdash; but the final commit in the branch reverts three real security
+  fixes (open redirect, ReDoS/crash, stored DOM XSS) under the mistaken premise that a <code class="inline">.snyk</code>
+  exclude-path fix made the code changes unnecessary. It didn't &mdash; the exclude only suppresses the scanner. These
+  need to be re-applied before merge.</p>
+</section>
+
+<section>
+  <h2>What this PR does</h2>
+  <ul class="tight">
+    <li>Replaces <code class="inline">react-scripts</code> with Vite (dev server, build, preview) and Jest with Vitest.</li>
+    <li>203 changed files, but 182 are pure <code class="inline">.js</code>&rarr;<code class="inline">.jsx</code> /
+    <code class="inline">.ts</code>&rarr;<code class="inline">.tsx</code> renames with zero content change &mdash; the
+    actual substantive diff is small.</li>
+    <li>Converts every <code class="inline">process.env.REACT_APP_*</code> reference to
+    <code class="inline">import.meta.env.VITE_*</code> (verified complete via grep).</li>
+    <li>Removes Enzyme, PollyJS, and snapshot-testing infrastructure from <code class="inline">setupTests</code>,
+    since (per PR description) no test used them.</li>
+    <li>Includes a security-fix commit for three Snyk-flagged issues, immediately followed by a revert commit that
+    undoes the code fixes while keeping only the <code class="inline">.snyk</code> path corrections.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Findings</h2>
+
+  <div class="finding blocking">
+    <span class="badge blocking">Blocking</span><h3>Revert commit reintroduces open redirect, ReDoS/crash, and stored DOM XSS</h3>
+    <p class="loc"><code class="inline">sippy-ng/src/component_readiness/JobArtifactQuery.jsx</code>,
+    <code class="inline">sippy-ng/src/prow_job_runs/IntervalsChart.jsx</code>,
+    <code class="inline">sippy-ng/src/releases/ReleaseOverview.jsx</code> (all reverted in commit <code class="inline">c4cbe7a7a</code>)</p>
+    <p>Commit <code class="inline">c4cbe7a7a</code> ("Revert security code changes, rely on .snyk excludes") frames
+    itself as cleaning up churn caused by stale <code class="inline">.snyk</code> paths, but it actually reverts
+    three real fixes from <code class="inline">8b910a33a</code>. A <code class="inline">.snyk</code> exclude only
+    suppresses the scanner finding &mdash; it does not fix the underlying vulnerability. All three bugs are live on
+    the head SHA.</p>
+<pre>// JobArtifactQuery.jsx (handleOpenLinks) — reverted to bare window.open;
+// <span class="hl">openLaunderedLink is still used 2 lines away in the same file for row.url</span>,
+// so the fix exists and is proven in place, just selectively unwired here.
+function handleOpenLinks(event) {
+  artifacts.forEach((file) =&gt; {
+    window.open(file.artifact_url, '_blank')
+  })
+}
+
+// IntervalsChart.jsx:filterIntervals — <span class="hl">filterText comes from a URL
+// query param</span> (params.get('filterText')); no try/catch means an invalid
+// regex throws uncaught, and a catastrophic-backtracking pattern can hang the tab.
+let re = null
+if (filterText) {
+  re = new RegExp(filterText)
+}
+
+// ReleaseOverview.jsx — <span class="hl">warning is API response content</span>
+// (release controller), rendered unsanitized.
+&lt;div dangerouslySetInnerHTML={{ __html: warning }}&gt;&lt;/div&gt;</pre>
+    <p><em>Verified locally:</em> <code class="inline">openLaunderedLink</code> is still defined and used elsewhere in
+    the same file; <code class="inline">filterText</code> traced to <code class="inline">params.get('filterText')</code>;
+    <code class="inline">warning</code> traced to the release-controller API response.</p>
+  </div>
+
+  <div class="finding nit">
+    <span class="badge nit">Nit</span><h3>Single 7.5&nbsp;MB JS bundle, no code splitting</h3>
+    <p class="loc"><code class="inline">sippy-ng/vite.config.js</code></p>
+    <p><code class="inline">npm run build</code> on head SHA emits one <code class="inline">index-*.js</code> chunk at
+    7.5&nbsp;MB (2.27&nbsp;MB gzip), triggering Rollup's &gt;500&nbsp;KB chunk-size warning. Not a regression this PR
+    needs to fix, but Vite makes <code class="inline">build.rollupOptions.output.manualChunks</code> / route-level
+    dynamic <code class="inline">import()</code> easy to add as a follow-up.</p>
+  </div>
+
+  <div class="finding nit">
+    <span class="badge nit">Nit</span><h3>esbuild surfaces pre-existing dead code during build</h3>
+    <p class="loc"><code class="inline">sippy-ng/src/helpers.jsx</code>, <code class="inline">sippy-ng/src/jobs/JobAnalysis.jsx</code></p>
+    <p>Build warns <code class="inline">Comparison using the "===" operator here is always false</code> for
+    <code class="inline">filter.items === []</code> (array-literal reference comparison, always false). Pre-existing
+    bug, out of scope here, but now visible for free via Vite's esbuild step where CRA's pipeline didn't surface it.
+    Worth a follow-up ticket.</p>
+  </div>
+
+  <div class="finding nit">
+    <span class="badge nit">Nit</span><h3>README drops documented API-component test convention with no replacement</h3>
+    <p class="loc"><code class="inline">sippy-ng/README.md</code></p>
+    <p>The rewrite removes the old convention text ("components hitting the API should have a snapshot + canary text
+    + call-count test") along with the now-defunct PollyJS/snapshot workflow instructions. Justified given
+    Vitest+RTL don't use that flow, but nothing replaces the underlying convention guidance.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Things I checked and was fine with</h2>
+  <ul class="tight">
+    <li>No leftover <code class="inline">process.env.REACT_APP_*</code> or <code class="inline">process.env.NODE_ENV</code> references anywhere in <code class="inline">sippy-ng/src/</code> (grep clean).</li>
+    <li>No leftover Enzyme/PollyJS/<code class="inline">jest.*</code> references in <code class="inline">sippy-ng/src/</code> (grep clean).</li>
+    <li><code class="inline">vite.config.js</code> <code class="inline">base: '/sippy-ng/'</code> matches the old CRA <code class="inline">homepage</code> field; <code class="inline">outDir: 'build'</code> preserves the existing embed/deploy path.</li>
+    <li><code class="inline">index.html</code> move to project root + module script tag is the correct Vite convention; all referenced static assets (favicon.ico, apple-touch-icon.png, site.webmanifest) exist under <code class="inline">public/</code>.</li>
+    <li><code class="inline">mcp/server.py</code> dev-server process detection (<code class="inline">react-scripts</code> &rarr; <code class="inline">vite</code>) matches the new invocation.</li>
+    <li><code class="inline">.snyk</code> exclude path updates (<code class="inline">73c4eb88a</code>) correctly point at the renamed <code class="inline">.jsx</code> files.</li>
+    <li><code class="inline">npm ci</code>, <code class="inline">npm test</code> (32/32 pass), <code class="inline">npm run build</code> all succeed on head SHA; <code class="inline">git status</code> clean afterward (no stray build artifacts tracked).</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions for the author</h2>
+  <ul class="tight">
+    <li>Why was commit <code class="inline">c4cbe7a7a</code> framed as reverting "unnecessary" code changes when it removes real, working security fixes (DOMPurify sanitization, <code class="inline">openLaunderedLink</code>, regex try/catch)? Was this intentional, or a misunderstanding of what <code class="inline">.snyk</code> excludes actually suppress?</li>
+    <li>Is there a follow-up planned for the 7.5&nbsp;MB single-bundle build output, or is this considered acceptable for now?</li>
+  </ul>
+</section>
+
+</body>
+</html>
