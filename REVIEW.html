@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3811</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; background: #fdfdfd; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  pre { background: #f4f4f4; padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  code { background: #f0f0f0; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; border-bottom: 2px solid #eee; padding-bottom: 0.3rem; margin-top: 2.2rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+  .meta { color: #555; font-size: 0.92rem; margin-bottom: 1.5rem; }
+  .meta div { margin: 0.15rem 0; }
+  .verdict-box { background: #eafaf0; border-left: 5px solid #2e9e5b; padding: 1rem 1.25rem; border-radius: 4px; margin: 1rem 0; }
+  .verdict-title { font-weight: 700; font-size: 1.1rem; color: #1e7a44; }
+  .finding { border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .finding-title { font-weight: 600; margin-bottom: 0.4rem; }
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
+  .badge-blocking { background: #fde2e2; color: #a11; }
+  .badge-should-fix { background: #fff2d6; color: #a66a00; }
+  .badge-nit { background: #e6f0fa; color: #2261a8; }
+  .badge-question { background: #f0e6fa; color: #6a2ea8; }
+  .loc { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  ul { padding-left: 1.4rem; }
+  a { color: #1a6fb5; }
+  .hl { background: #fff3a3; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3811</h1>
+<div class="meta">
+  <div><strong>Title:</strong> TRT-2741: Fix chat agent references to dropped matviews and add pre-aggregated table docs</div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Head SHA:</strong> <code>29e595dbbcb2f14fb7ec04fcbcb683500046be6a</code></div>
+  <div><strong>Reviewed at:</strong> 2026-07-24T10:35:31Z</div>
+  <div><a href="https://github.com/openshift/sippy/pull/3811" target="_blank">View PR on GitHub</a></div>
+</div>
+
+<div class="verdict-box">
+  <div class="verdict-title">Verdict: Approve</div>
+  <p>This is a docs/prompt-only change with no executable logic, and every claim in it checks out against the real Go models and query code. The SQL bug fixes (bigint timestamp comparison, <code>text[]</code> misuse, off-by-one ranges) are all verifiably correct fixes to genuinely broken example queries. No blocking issues found; two minor open questions worth a quick author confirmation.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Removes chat agent references to three materialized views that no longer exist (<code>prow_test_report_7d_matview</code>, <code>prow_test_report_2d_matview</code>, <code>prow_job_failed_tests_by_hour_matview</code>).</li>
+  <li>Documents the new pre-aggregated tables <code>test_daily_totals</code> and <code>test_cumulative_summaries</code>, including the prefix-sum subtraction pattern for arbitrary date ranges.</li>
+  <li>Adds a mandatory partition-pruning guideline requiring literal (not subquery/join) partition-key filters, with a worked two-step lookup pattern for partitioned tables.</li>
+  <li>Fixes several previously-broken example SQL queries: bigint-epoch timestamp comparison on a matview, <code>->></code> misuse on a <code>text[]</code> column (replaced with <code>unnest()</code>), off-by-one 7-day ranges, and missing <code>LIMIT</code> clauses.</li>
+  <li>Adds a new example 9 demonstrating the cumulative-summary prefix-sum pattern, and updates <code>test-analysis.yaml</code> to use <code>test_cumulative_summaries</code> instead of the dropped matviews.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Questions</h3>
+<div class="finding">
+  <span class="badge badge-question">Question</span>
+  <div class="finding-title">Assumed timestamp equality between parent run and partitioned test row</div>
+  <div class="loc"><code>chat/sippy_agent/tools/database_query.py:181-199</code> (example 3), <code>:262-289</code> (example 7)</div>
+  <p>The two-step lookup pattern fetches <code>prow_job_runs.timestamp</code> and reuses it as a literal filter for <code>prow_job_run_tests.prow_job_run_timestamp</code> / <code>prow_job_run_test_outputs.prow_job_run_test_timestamp</code>. This assumes the denormalized timestamp on the partitioned child tables is always exactly identical to the parent's. Plausible given the "denormalized for partitioning" comments in the Go model, but not something this review could verify end-to-end. If it ever drifts, the query would silently return zero rows instead of erroring.</p>
+  <pre><span class="hl">AND pjrt.prow_job_run_timestamp = '2026-07-15T10:30:00Z'::timestamptz</span> -- Partition key: from step 1</pre>
+</div>
+
+<h3>Nits</h3>
+<div class="finding">
+  <span class="badge badge-nit">Nit</span>
+  <div class="finding-title">No mention of staleness/lag for pre-aggregated tables</div>
+  <div class="loc"><code>chat/sippy_agent/tools/database_query.py:76-92</code></div>
+  <p>The docs don't caveat that <code>test_daily_totals</code>/<code>test_cumulative_summaries</code> may lag behind live <code>prow_job_run_tests</code> data (aggregation is presumably batch). Doesn't affect SQL correctness, but could make the agent overconfident about "as of now" freshness.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Column names for <code>test_daily_totals</code>/<code>test_cumulative_summaries</code> match <code>pkg/db/dailysummary/dailysummary.go</code> and <code>pkg/db/cumulativesummary/cumulative_summary.go</code> exactly.</li>
+  <li>Partition key column names match <code>pkg/db/models/prow.go</code> (<code>ProwJobRunTest</code>, <code>ProwJobRunTestOutput</code>).</li>
+  <li><code>prow_job_runs_report_matview.timestamp</code> confirmed as bigint epoch-ms via <code>pkg/db/views.go:217</code> — the new example 5 fix is a real bug fix, not a stylistic change.</li>
+  <li><code>variants</code> confirmed as <code>text[]</code>, not JSONB — the <code>-></code>&gt; to <code>unnest()</code> fix is correct.</li>
+  <li><code>prow_job_runs.prow_job_release</code> confirmed as the real column name used in the two-step partition-key lookup.</li>
+  <li>Prefix-sum subtraction pattern (example 9) matches the recurrence implemented by <code>UpdateDateForRelease</code> in <code>cumulative_summary.go</code>.</li>
+  <li>Repo-wide grep confirms zero remaining references to the three dropped matviews.</li>
+  <li>Both edited files still parse (Python AST parse, YAML safe_load) after the string-literal edits.</li>
+  <li>Pure docs/prompt change with no executable logic — no unit test coverage needed, consistent with the PR's own manual verification test plan.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is it guaranteed by ingestion code that <code>prow_job_run_tests.prow_job_run_timestamp</code> always exactly equals the parent <code>prow_job_runs.timestamp</code>, or is that just true in practice today?</li>
+  <li>Would it be worth a one-line caveat about aggregation lag/freshness for <code>test_daily_totals</code>/<code>test_cumulative_summaries</code>?</li>
+</ul>
+
+</body>
+</html>
