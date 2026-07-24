@@ -37,9 +37,10 @@
 <div class="meta">
   <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3797">openshift/sippy#3797</a></div>
   <div><strong>Title:</strong> [WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness</div>
-  <div><strong>Head SHA:</strong> <code class="inline">51fc2188be3929b5b4c393fbe5f50ffb9123e381</code></div>
+  <div><strong>Head SHA:</strong> <code class="inline">37f6d3e58c1f8215d8809f6f2996fcf1769b2346</code></div>
   <div><strong>Base:</strong> main</div>
-  <div><strong>Reviewed at:</strong> 2026-07-22T15:36:55Z</div>
+  <div><strong>Reviewed at:</strong> 2026-07-24T13:57:02Z</div>
+  <div><strong>Refresh log:</strong> updated from <code class="inline">51fc2188b</code> on 2026-07-24T13:57:02Z — rebased onto newer main (unrelated history ignored) plus two targeted bugfix commits (nestloop removal, GA-date lookup fix). See "Since previous review" below.</div>
 </div>
 
 <div class="verdict request-changes">Verdict: Request Changes</div>
@@ -52,6 +53,12 @@
   <li>Adds a parallel "existence/placeholder" query so PG grid cells with runs but no failures render <code class="inline">NotSignificant</code> instead of vanishing.</li>
   <li>Bundles an orthogonal refactor: <code class="inline">KeyWithVariants</code>/<code class="inline">ColumnIdentification</code> switch from JSON-encoded map keys to a custom <code class="inline">Encode()</code>.</li>
   <li>Frontend: cookie-based BQ/PG toggle, <code class="inline">dataSource</code> propagated through query state and HATEOAS links, default base window bumped 27→30 days to match <code class="inline">ga-30d</code> configs.</li>
+</ul>
+
+<p><strong>Since previous review:</strong> two targeted bugfix commits landed, no new architecture or files.</p>
+<ul>
+  <li><code class="inline">f4a7251d7</code> removes <code class="inline">SET LOCAL enable_nestloop = off</code> from <code class="inline">scanGroupedResults</code> — it was unintentionally forcing a bad plan on the unrelated LATERAL <code class="inline">last_failure</code> subquery, a 142s-vs-3.5s warm-cache regression. Now relies on existing session tuning instead.</li>
+  <li><code class="inline">37f6d3e58</code> fixes <code class="inline">baseMatchesGAWindow</code> to use GORM <code class="inline">First</code> instead of <code class="inline">Pluck</code> into <code class="inline">*time.Time</code> — <code class="inline">Pluck</code> silently failed to scan the date column, permanently forcing the slow prefix-sum fallback instead of the GA-optimized path. This introduces a new should-fix (below).</li>
 </ul>
 
 <h2>Findings</h2>
@@ -104,6 +111,22 @@ const [testTableDBSource, setTestTableDBSource] = React.useState(testTableDBSour
     tow.capabilities,
     cm.col_group_id AS variant_group_id, ...`</pre>
   <p><code class="inline">SELECT DISTINCT</code> is over <code class="inline">(component, col_group_id)</code> but still carries one real test's <code class="inline">capabilities</code>. Merged results are keyed by <code class="inline">TestID+Variants</code> only, so when multiple tests share a component+column with different capability sets, only one arbitrary capability set survives per synthetic placeholder row — on capability-grouped views this can attribute a <code class="inline">NotSignificant</code> placeholder to the wrong capability, or drop one. Not covered by the PR's manual test plan (which checked standard/cross-compare views, not capability drilldown).</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span><strong>GA-date lookup now warns on the routine "not yet GA" case</strong>
+  <div class="loc"><code class="inline">postgres/provider.go</code> (<code class="inline">baseMatchesGAWindow</code>, commit <code class="inline">37f6d3e58</code>)</div>
+  <pre>var rd models.ReleaseDefinition
+err := p.dbc.DB.WithContext(ctx).
+	Select("ga_date").
+	Where("release = ? AND ga_date < CURRENT_DATE", reqOptions.BaseRelease.Name).
+	First(&rd).Error
+if err != nil {
+	log.WithError(err).WithField("release", reqOptions.BaseRelease.Name).
+		Warn("failed to query GA date, falling back to prefix-sum query")
+	return false
+}</pre>
+  <p>The fix (switching <code class="inline">Pluck</code> to <code class="inline">First</code>) is correct, but <code class="inline">First</code> returns <code class="inline">gorm.ErrRecordNotFound</code> whenever the release isn't GA yet — the normal, expected case for any pre-GA release or `ga-Nd` cross-compare view. The <code class="inline">err != nil</code> branch logs a warning unconditionally, so every request against a non-GA base release will now emit a misleading "failed" warning for routine, expected fallback behavior. Should distinguish <code class="inline">ErrRecordNotFound</code> (expected, no/low-level log) from other DB errors.</p>
 </div>
 
 <div class="finding should-fix">

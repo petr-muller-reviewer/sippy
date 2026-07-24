@@ -1,15 +1,33 @@
 ---
 pr: openshift/sippy#3797
 title: "[WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness"
-head_sha: 51fc2188be3929b5b4c393fbe5f50ffb9123e381
+head_sha: 37f6d3e58c1f8215d8809f6f2996fcf1769b2346
 base: main
-reviewed_at: 2026-07-22T15:36:55Z
+reviewed_at: 2026-07-24T13:57:02Z
 verdict: request-changes
+refresh_log:
+  - from: 51fc2188be3929b5b4c393fbe5f50ffb9123e381
+    to: 37f6d3e58c1f8215d8809f6f2996fcf1769b2346
+    at: 2026-07-24T13:57:02Z
+    summary: >
+      Branch rebased onto much newer main (unrelated history, incl. sippy-ng
+      Vite/Vitest migration and .js->.jsx renames — not PR-specific, ignored).
+      Two new PR-specific commits: f4a7251d7 removes `SET LOCAL enable_nestloop
+      = off` from scanGroupedResults (was forcing bad plans on the LATERAL
+      last_failure join, 142s vs 3.5s warm-cache regression); 37f6d3e58 fixes
+      baseMatchesGAWindow to use GORM `First` instead of `Pluck` into
+      `*time.Time` (Pluck silently failed to scan the date column, forcing
+      permanent fallback to the slow prefix-sum path). No prior findings
+      addressed. One new should-fix identified (GA-date lookup now logs a
+      warning on every non-GA-aligned base release, not just real errors). No
+      PR comments/reviews since prior review. Labels unchanged (still WIP).
 ---
 
 ## Summary
 
 Adds a `dataSource` query param (`bigquery`|`postgres`) letting `MixedProvider` route Component Readiness queries per-request. Implements SQL push-down for PG (prefix-sum self-join over `test_cumulative_summaries`, GA-aligned path over `prow_ga_raw_test_data`), SQL-side variant-group aggregation, and a placeholder/existence query so grid cells with runs-but-no-failures render `NotSignificant`. Bundles an orthogonal `KeyWithVariants`/`ColumnIdentification` encoding refactor (JSON keys -> custom `Encode()`). Frontend: cookie-based BQ/PG toggle, `dataSource` propagated through query state, default base window 27->30 days. PR carries `do-not-merge/work-in-progress` label; own test-plan checklist has 2 unchecked items.
+
+Since previous review: two targeted commits landed, both fixing bugs surfaced by the author's own staging benchmarks/testing, no new architecture or files. `f4a7251d7` removes `SET LOCAL enable_nestloop = off` from `scanGroupedResults` (`postgres/cr_queries.go`) — it was unintentionally forcing a bad plan on the unrelated LATERAL `last_failure` subquery, causing a 142s-vs-3.5s warm-cache regression on the full prefix-sum query; relies on existing session tuning (`work_mem`, `random_page_cost`, partitionwise join/aggregate) instead. `37f6d3e58` fixes `baseMatchesGAWindow` (`postgres/provider.go`) to use GORM `First(&models.ReleaseDefinition{})` instead of `Pluck("ga_date", &gaDate *time.Time)`, since `Pluck` silently failed to scan the date column and was permanently forcing the slow prefix-sum fallback instead of the GA-optimized path — this was presumably masking most of the intended performance win of the GA routing feature. Neither commit addresses a finding from the prior review; one new should-fix is introduced by the second commit (see below).
 
 ## Findings
 
@@ -58,6 +76,21 @@ Adds a `dataSource` query param (`bigquery`|`postgres`) letting `MixedProvider` 
         tow.capabilities,
         cm.col_group_id AS variant_group_id,
         1 AS total_count, 1 AS success_count, 0 AS flake_count, ...`
+
+### [should-fix] GA-date lookup now warns on the routine "not yet GA" case
+- where: `pkg/api/componentreadiness/dataprovider/postgres/provider.go` (`baseMatchesGAWindow`, commit `37f6d3e58`)
+- concern: Switching from `Pluck` to `First(&rd)` fixed the real bug (silent scan failure), but `First` returns `gorm.ErrRecordNotFound` whenever the `WHERE release = ? AND ga_date < CURRENT_DATE` filter matches no row — which is the normal, expected state for any release that isn't GA yet (e.g. all `ga-Nd` cross-compare views on a pre-GA release). The `err != nil` branch logs `Warn("failed to query GA date, falling back to prefix-sum query")` unconditionally, so every request against a non-GA base release will now emit a misleading warning on a per-request basis, framing routine fallback as a failure. Should distinguish `gorm.ErrRecordNotFound` (expected, no log or debug-level) from other DB errors (worth a warning).
+- excerpt: |
+    var rd models.ReleaseDefinition
+    err := p.dbc.DB.WithContext(ctx).
+    	Select("ga_date").
+    	Where("release = ? AND ga_date < CURRENT_DATE", reqOptions.BaseRelease.Name).
+    	First(&rd).Error
+    if err != nil {
+    	log.WithError(err).WithField("release", reqOptions.BaseRelease.Name).
+    		Warn("failed to query GA date, falling back to prefix-sum query")
+    	return false
+    }
 
 ### [should-fix] README/config docs not updated for new dataSource param
 - where: `pkg/api/README.md`, `config/README.md`
