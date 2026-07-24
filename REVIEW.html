@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3815</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, .mono {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: #f4f4f6;
+    border: 1px solid #e0e0e5;
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+  header {
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header .meta {
+    color: #555;
+    font-size: 0.95em;
+  }
+  header .meta div { margin: 0.15rem 0; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.3rem; }
+  h2 {
+    font-size: 1.2rem;
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+  .verdict-box {
+    background: #fff8e6;
+    border: 1px solid #f0d98c;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+  }
+  .verdict-label {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    background: #f0a500;
+    color: #fff;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.5rem;
+  }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    background: #fafafa;
+    border-radius: 0 6px 6px 0;
+  }
+  .finding.blocking { border-color: #d33; }
+  .finding.should-fix { border-color: #e69500; }
+  .finding.nit { border-color: #888; }
+  .finding.question { border-color: #3070c0; }
+  .sev {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    color: #fff;
+    margin-right: 0.5rem;
+  }
+  .sev.blocking { background: #d33; }
+  .sev.should-fix { background: #e69500; }
+  .sev.nit { background: #888; }
+  .sev.question { background: #3070c0; }
+  .loc {
+    display: block;
+    margin: 0.3rem 0;
+    color: #444;
+  }
+  ul { padding-left: 1.4rem; }
+  li { margin: 0.35rem 0; }
+  a { color: #0857c3; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3815</h1>
+  <div class="meta">
+    <div><strong>Title:</strong> TRT-2805: Optimize /api/tests/recent_failures query performance</div>
+    <div><strong>Base:</strong> main</div>
+    <div><strong>Head SHA:</strong> <span class="mono">fdbffcfddaff5550eb752be4eaaadbe660c1f252</span></div>
+    <div><strong>Reviewed at:</strong> 2026-07-24T17:46:44Z</div>
+    <div><a href="https://github.com/openshift/sippy/pull/3815" target="_blank">github.com/openshift/sippy/pull/3815</a></div>
+  </div>
+</header>
+
+<div class="verdict-box">
+  <div class="verdict-label">Needs discussion</div>
+  <p>The core optimization strategy is sound &mdash; the join reversal and use of denormalized partition columns match the table's actual partitioning scheme, and the day-walking <code>findLastPass</code> approach is a reasonable way to stay partition-aligned. However, two behavior changes (dropped <code>deleted_at</code> checks on <code>prow_job_runs</code>/<code>prow_jobs</code>, and a fixed 90-day last-pass lookback replacing the period-derived one) need explicit confirmation from the author before merge, and the rewrite currently ships with zero unit tests despite introducing several new non-trivial functions.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Reverses the main aggregation's join order: filters <code>prow_job_run_tests</code> by status/partition columns first, then joins <code>tests</code>/<code>suites</code>/<code>test_ownerships</code> onto the already-aggregated result.</li>
+  <li>Drops the <code>prow_job_runs</code>/<code>prow_jobs</code> joins from the main query, relying on denormalized <code>prow_job_run_release</code>/<code>prow_job_run_timestamp</code> columns instead (these are the actual partition keys).</li>
+  <li>Runs the COUNT and Scan queries concurrently via <code>errgroup</code> and cloned <code>gorm.Session</code>s.</li>
+  <li>Scopes the <code>findLastPass</code> and <code>fetchOutputs</code> follow-up queries to only the current page (5&ndash;25 rows) instead of the whole result set.</li>
+  <li>Correlates everything on <code>(test_id, suite_id)</code> instead of <code>test_id</code> alone, fixing a pre-existing bug where suite was ignored.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="sev should-fix">should-fix</span><strong>Inconsistent deleted_at handling across query paths</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:259-301, 313-364 vs 376-436</span>
+  <p>The original query filtered <code>prow_job_runs.deleted_at IS NULL</code> and <code>prow_jobs.deleted_at IS NULL</code> everywhere. The new main aggregation, its <code>NOT EXISTS</code> subquery, and <code>findLastPass</code> no longer join those tables and only check <code>prow_job_run_tests.deleted_at</code>. <code>fetchOutputs</code> still joins both tables and checks their <code>deleted_at</code>. If those tables are ever soft-deleted independently of <code>prow_job_run_tests</code>, failure counts / last-pass timestamps could include soft-deleted runs while outputs would exclude them.</p>
+  <pre>FROM prow_job_run_tests pjrt
+WHERE pjrt.status = ?
+    AND pjrt.prow_job_run_release = ?
+    AND pjrt.prow_job_run_timestamp &gt;= ? AND pjrt.prow_job_run_timestamp &lt; ?
+    AND pjrt.deleted_at IS NULL
+-- no prow_job_runs/prow_jobs join or deleted_at check, unlike fetchOutputs</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="sev should-fix">should-fix</span><strong>findLastPass lookback changed from period-derived to fixed 90 days</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:326-328</span>
+  <p>Previously <code>lastPassLookback</code> was <code>periodStart</code> (or <code>periodStart - previousPeriod</code>), tied to the report's configured window. Now it's hardcoded to 90 days back from <code>reportEnd</code>. For any configuration where <code>period + previousPeriod</code> exceeds 90 days, this silently narrows the search and can return no last-pass where the old code would have found one.</p>
+  <pre>endDate := civil.DateOf(reportEnd.UTC())
+limitDate := endDate.AddDays(-90)</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="sev should-fix">should-fix</span><strong>No test coverage for new logic</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:248-436</span>
+  <p>Substantial rewrite (<code>buildRecentFailuresQuery</code>, <code>testSuiteKey</code>, <code>findLastPass</code>, <code>testIDsFromKeys</code>, <code>fetchOutputs</code>) ships with zero unit tests. <code>testSuiteKey</code> construction and <code>testIDsFromKeys</code> are pure logic and should be table-driven tested; DB-dependent pieces fit the repo's existing functional-test-behind-env-var pattern.</p>
+  <pre>type testSuiteKey struct {
+    testID  uint
+    suiteID uint // 0 represents NULL suite_id
+}</pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <span class="sev nit">nit</span><strong>findLastPass worst case is 90 sequential per-day queries</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:329-361</span>
+  <p>For a test that hasn't passed within 90 days, the loop runs all 90 day-partition queries before giving up. Fine for the common case (~3 iterations per the PR's own benchmarks), but a page dominated by never-passing tests could reintroduce a latency cliff. Worth a spot-check against a known always-failing test.</p>
+</div>
+
+<div class="finding nit">
+  <span class="sev nit">nit</span><strong>suiteID 0 as NULL sentinel is implicit</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:304-307</span>
+  <p><code>testSuiteKey{suiteID: 0}</code> represents <code>suite_id IS NULL</code>. Verified <code>Suite</code> uses <code>gorm.Model</code> (auto-increment starting at 1), so this is safe in practice, but the invariant isn't documented beyond a one-word comment.</p>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding question">
+  <span class="sev question">question</span><strong>Concurrent Count/Scan via gorm Session cloning relies on non-obvious internals</strong>
+  <span class="loc mono">pkg/api/recent_test_failures.go:86-101</span>
+  <p><code>scanQuery</code>/<code>countQuery</code> both derive from <code>filteredQuery.Session(&amp;gorm.Session{NewDB: false})</code> and run concurrently via errgroup. This avoids a data race only because <code>Limit</code>/<code>Offset</code> on <code>scanQuery</code> force gorm (v1.22.2) to clone its <code>Statement</code> before the goroutines are spawned; <code>countQuery</code>'s clone happens lazily inside its own goroutine, reading (not writing) the shared original <code>Statement</code>. Correct today, but fragile if the <code>pagination != nil</code> guard changes or gorm's clone-on-write semantics change.</p>
+  <pre>scanQuery := filteredQuery.Session(&amp;gorm.Session{NewDB: false})
+if pagination != nil {
+    scanQuery = scanQuery.Limit(pagination.PerPage).Offset(pagination.Page * pagination.PerPage)
+}
+...
+countQuery := filteredQuery.Session(&amp;gorm.Session{NewDB: false})</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL injection via <code>fmt.Sprintf</code> embedding <code>innerSQL</code> into <code>outerSQL</code>: only static SQL text is interpolated, all dynamic values go through <code>?</code> placeholders &mdash; no injection risk.</li>
+  <li><code>civil.Date</code> passed directly as a query param in <code>findLastPass</code>: implements <code>driver.Valuer</code> (confirmed in vendored <code>civil.go</code>), works correctly with the postgres driver.</li>
+  <li>Denormalized <code>prow_job_run_release</code>/<code>prow_job_run_timestamp</code> columns replacing joined-table filters: these are the actual partition keys per the partitioned-tables migration, so the simplification is sound.</li>
+  <li><code>RecentTestFailure.SuiteID</code> correctly threaded through <code>GetNumericalValue</code> for filter/sort parity.</li>
+  <li>Suite ID auto-increment starts at 1, making the <code>suiteID: 0</code> NULL sentinel safe.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is dropping the <code>prow_job_runs</code>/<code>prow_jobs</code> <code>deleted_at</code> checks in the main aggregation and <code>findLastPass</code> intentional, given <code>fetchOutputs</code> still applies them?</li>
+  <li>Should <code>findLastPass</code>'s 90-day lookback instead be derived from <code>period</code>/<code>previousPeriod</code> as before, to avoid narrowing results for longer report windows?</li>
+  <li>Was <code>go test -race</code> run against the concurrent Count/Scan path to confirm there's no data race?</li>
+</ul>
+
+</body>
+</html>
