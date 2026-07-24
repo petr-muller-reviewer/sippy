@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3797</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.55; color: #1a1a1a; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; background: #fff; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; }
+  pre { background: #f5f5f7; border: 1px solid #e0e0e5; border-radius: 6px; padding: 0.75rem 1rem; overflow-x: auto; }
+  code.inline { background: #f0f0f3; padding: 0.1em 0.35em; border-radius: 4px; }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #333; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.02rem; margin-bottom: 0.3rem; }
+  .meta { background: #f5f5f7; border-radius: 8px; padding: 1rem 1.25rem; font-size: 0.92rem; }
+  .meta div { margin: 0.15rem 0; }
+  .verdict { font-size: 1.1rem; font-weight: 600; padding: 0.75rem 1rem; border-radius: 8px; margin: 1rem 0; }
+  .verdict.request-changes { background: #fff3e0; border: 1px solid #f0b429; color: #7a4a00; }
+  .finding { border: 1px solid #e0e0e5; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .finding.blocking { border-left: 5px solid #d32f2f; }
+  .finding.should-fix { border-left: 5px solid #f0a500; }
+  .finding.nit { border-left: 5px solid #757575; }
+  .finding.question { border-left: 5px solid #1976d2; }
+  .badge { display: inline-block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; vertical-align: middle; }
+  .badge.blocking { background: #d32f2f; color: #fff; }
+  .badge.should-fix { background: #f0a500; color: #fff; }
+  .badge.nit { background: #757575; color: #fff; }
+  .badge.question { background: #1976d2; color: #fff; }
+  .loc { color: #555; font-size: 0.85rem; }
+  ul { padding-left: 1.4rem; }
+  li { margin: 0.3rem 0; }
+  a { color: #1976d2; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3797</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3797">openshift/sippy#3797</a></div>
+  <div><strong>Title:</strong> [WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness</div>
+  <div><strong>Head SHA:</strong> <code class="inline">51fc2188be3929b5b4c393fbe5f50ffb9123e381</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-07-22T15:36:55Z</div>
+</div>
+
+<div class="verdict request-changes">Verdict: Request Changes</div>
+<p>The core BQ/PG routing and HATEOAS propagation work correctly and I found no SQL injection risk. But the PR is missing test coverage for its riskiest new code (hand-built SQL with manually-ordered bind args), silently bypasses the new toggle in three <code class="inline">MixedProvider</code> methods, ships a frontend default-state bug that shows the wrong active backend on first visit, and is missing the README updates this repo's conventions require. This lines up with the PR's own <code class="inline">do-not-merge/work-in-progress</code> label — good candidate to fix these before requesting full review.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a validated <code class="inline">dataSource</code> query param (<code class="inline">bigquery</code>|<code class="inline">postgres</code>) so <code class="inline">MixedProvider</code> can route Component Readiness queries per-request.</li>
+  <li>Replaces PG's Go-side filtering with SQL push-down: a prefix-sum self-join over <code class="inline">test_cumulative_summaries</code> for arbitrary windows, and a GA-aligned path over <code class="inline">prow_ga_raw_test_data</code> (new 421-line file <code class="inline">postgres/cr_queries.go</code>).</li>
+  <li>Adds a parallel "existence/placeholder" query so PG grid cells with runs but no failures render <code class="inline">NotSignificant</code> instead of vanishing.</li>
+  <li>Bundles an orthogonal refactor: <code class="inline">KeyWithVariants</code>/<code class="inline">ColumnIdentification</code> switch from JSON-encoded map keys to a custom <code class="inline">Encode()</code>.</li>
+  <li>Frontend: cookie-based BQ/PG toggle, <code class="inline">dataSource</code> propagated through query state and HATEOAS links, default base window bumped 27→30 days to match <code class="inline">ga-30d</code> configs.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3 style="margin-top:1.5rem;">Blocking</h3>
+
+<div class="finding blocking">
+  <span class="badge blocking">Blocking</span><strong>MixedProvider bypasses dataSource toggle for variant/job-variant lookups</strong>
+  <div class="loc"><code class="inline">pkg/api/componentreadiness/dataprovider/mixed/provider.go:59-61,78-83</code></div>
+  <pre>func (p *MixedProvider) QueryUniqueVariantValues(...) {
+	return p.bq.QueryUniqueVariantValues(...)
+}
+func (p *MixedProvider) QueryJobVariantValues(...) {
+	return p.bq.QueryJobVariantValues(...)
+}
+func (p *MixedProvider) LookupJobVariants(...) {
+	return p.bq.LookupJobVariants(...)
+}</pre>
+  <p>These three methods are hard-wired to <code class="inline">p.bq</code>, unlike every other method which routes via <code class="inline">providerFor(reqOptions)</code>. When a user selects <code class="inline">dataSource=postgres</code>, filter-dropdown population and job-variant lookups still hit BigQuery while the report data comes from Postgres — a parity gap the project's conventions explicitly call out as something to avoid, unless deliberately documented.</p>
+</div>
+
+<div class="finding blocking">
+  <span class="badge blocking">Blocking</span><strong>New SQL push-down logic has zero test coverage</strong>
+  <div class="loc"><code class="inline">pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go</code> (421 new lines), <code class="inline">variants.go</code> (206 new lines)</div>
+  <pre>failureArgs := make([]any, len(joinArgs))
+copy(failureArgs, joinArgs)
+failureArgs = append(failureArgs, minimumFailure, release, start, end)</pre>
+  <p>No unit tests for the pure-logic builders (<code class="inline">buildVariantFilterClause</code>, <code class="inline">buildVariantGroupMapping</code>, <code class="inline">buildColumnGroupMapping</code>) and no functional test against real Postgres, despite the repo having an established pattern for exactly this (<code class="inline">releasesync_functional_test.go</code>). The query builders assemble 3-4 layers of nested <code class="inline">fmt.Sprintf</code> SQL and hand-reconstruct matching <code class="inline">[]any</code> arg slices in the same order, with nothing tying arg order to placeholder order at compile time or runtime. I traced both queries and today's ordering is correct, but a future edit reordering a WHERE/HAVING clause would silently desync args from placeholders — wrong data, no error, and nothing would catch it.</p>
+</div>
+
+<div class="finding blocking">
+  <span class="badge blocking">Blocking</span><strong>Frontend toggle default state contradicts actual data source</strong>
+  <div class="loc"><code class="inline">sippy-ng/src/App.js:439-441,650,662</code>; <code class="inline">CompReadyVars.js:139-141</code>; <code class="inline">ComponentReadinessIndicator.js:61-63</code></div>
+  <pre>// App.js — defaults to undefined when no cookie:
+const testTableDBSourcePreference = cookies['testTableDBSource']
+const [testTableDBSource, setTestTableDBSource] = React.useState(testTableDBSourcePreference)
+// App.js:650 icon logic treats anything != 'bigquery' as Postgres-active
+// CompReadyVars.js:141 fetch logic treats anything != 'postgres' as bigquery</pre>
+  <p>On first visit (no cookie set), the toggle icon/tooltip claims Postgres is active, but the actual data-fetch code is still querying BigQuery. Fix by defaulting the toggle state to <code class="inline">'bigquery'</code> explicitly.</p>
+</div>
+
+<h3 style="margin-top:1.5rem;">Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span><strong>Placeholder/existence query can misattribute capability on grouped cells</strong>
+  <div class="loc"><code class="inline">postgres/cr_queries.go</code> (<code class="inline">placeholderOuterQuery</code>, <code class="inline">runFailureAndExistence</code>)</div>
+  <pre>const placeholderOuterQuery = `SELECT DISTINCT
+    'grid:' || tow.component AS test_id,
+    ...
+    tow.capabilities,
+    cm.col_group_id AS variant_group_id, ...`</pre>
+  <p><code class="inline">SELECT DISTINCT</code> is over <code class="inline">(component, col_group_id)</code> but still carries one real test's <code class="inline">capabilities</code>. Merged results are keyed by <code class="inline">TestID+Variants</code> only, so when multiple tests share a component+column with different capability sets, only one arbitrary capability set survives per synthetic placeholder row — on capability-grouped views this can attribute a <code class="inline">NotSignificant</code> placeholder to the wrong capability, or drop one. Not covered by the PR's manual test plan (which checked standard/cross-compare views, not capability drilldown).</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span><strong>README/config docs not updated for new dataSource param</strong>
+  <div class="loc"><code class="inline">pkg/api/README.md</code>, <code class="inline">config/README.md</code></div>
+  <p>Repo convention requires README updates in the same PR when API endpoints or config/params change. Verified neither file mentions <code class="inline">dataSource</code> or the BQ/PG toggle. <code class="inline">docs/features/</code> also has no update despite this adding a new query architecture to a documented major feature.</p>
+</div>
+
+<h3 style="margin-top:1.5rem;">Nits</h3>
+
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>QueryJobVariants reqOptions param unused on both concrete providers</strong>
+  <div class="loc"><code class="inline">dataprovider/bigquery/provider.go</code>, <code class="inline">dataprovider/postgres/provider.go</code></div>
+  <p>The signature change is threaded through the interface and both providers, but only <code class="inline">MixedProvider.providerFor()</code> uses it. A short comment would prevent future confusion about why it's unused on both sides.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>Endpoint descriptions still say "BigQuery" only</strong>
+  <div class="loc"><code class="inline">pkg/server/server.go:2730,2739</code></div>
+  <p><code class="inline">/api/component_readiness*</code> endpoint descriptions still read "Reports component readiness from BigQuery" despite now supporting <code class="inline">dataSource=postgres</code>.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>testTableDBSource cookie repurposed without rename/comment</strong>
+  <div class="loc"><code class="inline">sippy-ng/src/App.js</code></div>
+  <p>Cookie previously scoped to <code class="inline">tests/TestTable.js</code> now also drives Component Readiness. Functionally fine, but the name no longer reflects its scope.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>windowDays computation duplicated</strong>
+  <div class="loc"><code class="inline">postgres/provider.go:242</code>, <code class="inline">postgres/cr_queries.go:158</code></div>
+  <p><code class="inline">int(reqOptions.BaseRelease.End.Sub(reqOptions.BaseRelease.Start).Hours() / 24)</code> is duplicated verbatim; extract to a shared helper.</p>
+</div>
+
+<h3 style="margin-top:1.5rem;">Questions</h3>
+
+<div class="finding question">
+  <span class="badge question">Question</span><strong>Is BQ-only routing for variant/job-variant lookups intentional?</strong>
+  <p>Is the bypass in the three <code class="inline">MixedProvider</code> methods above deliberate (reference data assumed identical across backends), or an oversight?</p>
+</div>
+
+<div class="finding question">
+  <span class="badge question">Question</span><strong>Is the GA window day-truncation robust to future changes?</strong>
+  <p><code class="inline">windowDays := int(End.Sub(Start).Hours() / 24)</code> relies on <code class="inline">End</code>/<code class="inline">Start</code> being rounded to specific times of day so the ~30.9999-day span truncates to exactly 30. Verified correct today but undocumented — guaranteed by an invariant, or fragile?</p>
+</div>
+
+<div class="finding question">
+  <span class="badge question">Question</span><strong>Should BQ/PG grid-cell equivalence be tested explicitly?</strong>
+  <p>BQ has no placeholder/existence mechanism; PG needs one because its push-down filters aggressively. This looks intentional, but is there a plan to assert BQ and PG produce identical <code class="inline">NotSignificant</code> cells for the same data before this leaves WIP?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL injection: not found — user-controlled values go through bind params or a strict allow-list regexp (<code class="inline">dataSource</code> validated via <code class="inline">pkg/util/param/param.go:67</code>).</li>
+  <li>Concurrency in <code class="inline">runFailureAndExistence</code> (goroutines via <code class="inline">WaitGroup.Go</code>): no shared mutable state during the parallel section, errors from both paths collected properly.</li>
+  <li>HATEOAS <code class="inline">dataSource</code> propagation through test-details links: correct, only added when non-empty, covered by tests (<code class="inline">utils_test.go</code>).</li>
+  <li><code class="inline">gofmt -l</code> and <code class="inline">go vet ./pkg/api/componentreadiness/...</code>: clean on touched files.</li>
+  <li><code class="inline">sets.Set[string]</code> used correctly in new code per repo convention.</li>
+  <li><code class="inline">deserializeRowToTestStatus</code> (BQ) updated to populate <code class="inline">TestID</code>/<code class="inline">Variants</code> directly, matching PG's <code class="inline">scanGroupedResults</code> — consistent with the encoding refactor.</li>
+  <li><code class="inline">Encode()</code>/<code class="inline">DecodeColumnID()</code> refactor and <code class="inline">component_report_test.go</code> updates: well covered with table-driven tests.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the BQ-only routing for <code class="inline">QueryUniqueVariantValues</code>/<code class="inline">QueryJobVariantValues</code>/<code class="inline">LookupJobVariants</code> intentional?</li>
+  <li>Is the GA window day-truncation guaranteed correct by an invariant elsewhere, or should it get an explicit comment/test?</li>
+  <li>Do you plan to add a test asserting BQ and PG produce identical <code class="inline">NotSignificant</code> grid cells for the same underlying data?</li>
+</ul>
+
+</body>
+</html>
