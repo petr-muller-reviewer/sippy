@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3823</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 880px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e0e0e0;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header h1 { margin-bottom: 0.25rem; font-size: 1.4rem; }
+  .meta { color: #555; font-size: 0.92rem; }
+  .meta div { margin: 0.15rem 0; }
+  .verdict-box {
+    border-left: 5px solid #b8860b;
+    background: #fff8ec;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+  }
+  .verdict-box .label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #8a5a00; }
+  h2 {
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+    margin-top: 2.2rem;
+  }
+  .finding {
+    margin: 1.2rem 0;
+    padding: 0.9rem 1.1rem;
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+  }
+  .finding.blocking { border-left: 5px solid #c0392b; background: #fdf3f2; }
+  .finding.should-fix { border-left: 5px solid #d68910; background: #fdf7ec; }
+  .finding.nit { border-left: 5px solid #7f8c8d; background: #f7f7f7; }
+  .finding.question { border-left: 5px solid #2874a6; background: #eef6fb; }
+  .finding h3 { margin: 0 0 0.3rem 0; font-size: 1.02rem; }
+  .sev-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5em;
+    color: #fff;
+    vertical-align: middle;
+  }
+  .sev-tag.blocking { background: #c0392b; }
+  .sev-tag.should-fix { background: #d68910; }
+  .sev-tag.nit { background: #7f8c8d; }
+  .sev-tag.question { background: #2874a6; }
+  .loc { font-size: 0.85rem; color: #444; margin: 0.3rem 0; }
+  ul.plain li { margin: 0.35rem 0; }
+  a { color: #1a5276; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Code Review &mdash; openshift/sippy#3823</h1>
+  <div class="meta">
+    <div><strong>Title:</strong> wip: add support for parsing JUnit testcase lifecycle</div>
+    <div><strong>Head SHA:</strong> <code class="inline">3633b44cea75c06d09ad89c213e56571eed1c141</code></div>
+    <div><strong>Base:</strong> main</div>
+    <div><strong>Reviewed at:</strong> 2026-07-25T13:51:40Z</div>
+    <div><a href="https://github.com/openshift/sippy/pull/3823" target="_blank">View PR on GitHub</a></div>
+  </div>
+</header>
+
+<div class="verdict-box">
+  <span class="label">Needs discussion</span>
+  <p>This is a small, correct, additive slice of a larger effort &mdash; consistent with its own <code class="inline">wip:</code> title and <code class="inline">do-not-merge/work-in-progress</code> label. The JUnit parsing and struct plumbing are fine and tested, but the new <code class="inline">Lifecycle</code> field is currently write-only: it's captured on ingest but not merged correctly across duplicate test runs and not consumed by anything downstream. Worth confirming the follow-up plan before the WIP label comes off.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul class="plain">
+  <li>Adds a <code class="inline">Lifecycle string \`xml:"lifecycle,attr"\`</code> field to <code class="inline">junit.TestCase</code> (<code class="inline">pkg/apis/junit/types.go</code>).</li>
+  <li>Adds a matching <code class="inline">Lifecycle string</code> field to <code class="inline">prowloader/types.TestCaseEntry</code>.</li>
+  <li>Populates <code class="inline">Lifecycle</code> from the JUnit test case when first creating a <code class="inline">TestCaseEntry</code> in <code class="inline">extractTestCases</code> (<code class="inline">prow.go</code>).</li>
+  <li>Adds two new table-driven test cases exercising lifecycle passthrough on pass and fail-with-output paths.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <h3><span class="sev-tag should-fix">Should fix</span>Lifecycle dropped in flake-merge branch</h3>
+  <div class="loc"><code class="inline">pkg/dataloader/prowloader/prow.go:1721-1726</code></div>
+  <p>When the same test appears twice with differing pass/fail status, only <code class="inline">Output</code> is backfilled onto the existing entry &mdash; <code class="inline">Lifecycle</code> is never merged or updated. If the first-seen run lacked lifecycle data (or carried different lifecycle data) than a later run, that information is silently lost.</p>
+  <pre>} else if (existing.Status == int(sippyprocessingv1.TestStatusFailure) &amp;&amp; status == sippyprocessingv1.TestStatusSuccess) ||
+    (existing.Status == int(sippyprocessingv1.TestStatusSuccess) &amp;&amp; status == sippyprocessingv1.TestStatusFailure) {
+    existing.Status = int(sippyprocessingv1.TestStatusFlake)
+    if existing.Output == nil {
+        existing.Output = output
+    }
+}</pre>
+</div>
+
+<div class="finding should-fix">
+  <h3><span class="sev-tag should-fix">Should fix</span>Lifecycle captured but never consumed downstream</h3>
+  <div class="loc"><code class="inline">pkg/dataloader/prowloader/testconversion/testconversion.go</code>, <code class="inline">pkg/dataloader/prowloader/prow.go</code> (~line 1680)</div>
+  <p><code class="inline">TestCaseEntry.Lifecycle</code> is set but not read by <code class="inline">testsToRawJobRunResult</code>, <code class="inline">ConvertProwJobRunToSyntheticTests</code>, or the loop building the final <code class="inline">RawJobRunResult</code>. Right now the field has zero observable effect on Sippy's output &mdash; expected given the WIP status, but flagging so it isn't lost track of.</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="sev-tag question">Question</span>BigQuery parity</h3>
+  <div class="loc">n/a &mdash; dataloader/Postgres path only</div>
+  <p>Project convention calls for parity between the BigQuery and PostgreSQL/dataloader providers on query-logic/data changes. Is a matching BigQuery-side change planned, or intentionally deferred to a later commit in this same effort?</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="sev-tag question">Question</span>Suite-level lifecycle attribute?</h3>
+  <div class="loc"><code class="inline">pkg/apis/junit/types.go:58-73</code></div>
+  <p>Only <code class="inline">TestCase</code> gains the new attribute. Does the openshift-tests-private JUnit schema this models ever place <code class="inline">lifecycle</code> on the <code class="inline">&lt;testsuite&gt;</code> element too, or is it testcase-only?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="plain">
+  <li>The <code class="inline">TestCase.Lifecycle</code> addition is purely additive; XML unmarshal tolerates the missing attribute on older reports (zero-value empty string), so no behavior change for existing consumers.</li>
+  <li>New test cases in <code class="inline">extract_test_cases_test.go</code> correctly exercise pass and fail-with-output paths with lifecycle set.</li>
+  <li>No security concerns &mdash; no user input or injection surface touched.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul class="plain">
+  <li>Is preserving/merging <code class="inline">Lifecycle</code> across the flake-merge branch planned as a follow-up commit within this PR?</li>
+  <li>Where will <code class="inline">Lifecycle</code> ultimately surface (API response, frontend, BigQuery), and is that tracked here or separately, before the WIP label comes off?</li>
+  <li>Can <code class="inline">lifecycle</code> ever appear on the suite element rather than (or in addition to) the testcase element in the schema being modeled?</li>
+</ul>
+
+</body>
+</html>
