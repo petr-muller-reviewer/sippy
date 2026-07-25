@@ -15,3 +15,4 @@
 000006_partition_cumulative_tables
 000007_drop_test_daily_summaries
 000008_add_summary_timestamps
+000009_drop_test_analysis_by_job_by_dates
