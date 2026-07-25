@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3821</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SF Mono", Consolas, Monaco, "Courier New", monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table {
+    border-collapse: collapse;
+  }
+  header td {
+    padding: 0.15rem 0.6rem 0.15rem 0;
+    vertical-align: top;
+  }
+  header td.key {
+    color: #666;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 6px;
+    font-weight: 700;
+    background: #e6f4ea;
+    color: #1e7e34;
+    margin-bottom: 0.5rem;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left: 5px solid #c0392b; }
+  .finding.should-fix { border-left: 5px solid #d68910; }
+  .finding.nit { border-left: 5px solid #7f8c8d; }
+  .finding.question { border-left: 5px solid #2980b9; }
+  .tag {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+  }
+  .tag.blocking { background: #fce8e6; color: #c0392b; }
+  .tag.should-fix { background: #fdf2e0; color: #b9770e; }
+  .tag.nit { background: #ecf0f1; color: #555; }
+  .tag.question { background: #eaf2fa; color: #2471a3; }
+  .loc { color: #666; font-size: 0.85em; margin-bottom: 0.5rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #2471a3; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: TRT-2799: syncPRStatus: Fix SHA mismatch bug (MergeCommitSHA vs Head.SHA)</h1>
+  <table>
+    <tr><td class="key">PR</td><td><a href="https://github.com/openshift/sippy/pull/3821">openshift/sippy#3821</a></td></tr>
+    <tr><td class="key">Base</td><td>main</td></tr>
+    <tr><td class="key">Head SHA</td><td><code class="inline">89c0433878f44acc6bc42df45f0262a9bd8e9ede</code></td></tr>
+    <tr><td class="key">Reviewed at</td><td>2026-07-25T21:25:28Z</td></tr>
+  </table>
+</header>
+
+<section>
+  <h2>Verdict</h2>
+  <div class="verdict">Approve</div>
+  <p>
+    Correct, well-targeted fix for a real bug (SHA mismatch caused 82% of rows to never get
+    <code class="inline">merged_at</code> set), consistent with existing code patterns in the file
+    (temp-table COPY + bulk SQL idiom already used elsewhere). The one behavioral regression
+    (partial progress discarded on rate-limit) is low severity and self-healing on the next
+    scheduled run, so it doesn't block merging.
+  </p>
+</section>
+
+<section>
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Adds <code class="inline">MergedPR</code> type and <code class="inline">ListRecentlyMergedPRs</code> to the GitHub client, returning <code class="inline">Head.SHA</code> (the real PR head commit) instead of the previously (incorrectly) used <code class="inline">MergeCommitSHA</code>.</li>
+    <li>Rewrites <code class="inline">syncPRStatus</code> from a per-row loop with individual <code class="inline">Save()</code> calls into a batch pipeline: distinct <code class="inline">(org, repo)</code> pairs &rarr; fetch recently-merged PRs per repo &rarr; <code class="inline">COPY</code> into a Postgres temp table &rarr; bulk <code class="inline">UPDATE</code> of <code class="inline">merged_at</code> and bulk <code class="inline">DELETE</code> of stale risk-analysis comment records.</li>
+    <li>Reuses the same lazy <code class="inline">closedCache</code> already used by <code class="inline">IsPrRecentlyMerged</code>.</li>
+    <li>Adds <code class="inline">TestClient_ListRecentlyMergedPRs</code>, explicitly asserting the returned SHA is <code class="inline">Head.SHA</code> and not <code class="inline">MergeCommitSHA</code>.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Findings</h2>
+
+  <h3>Should fix</h3>
+  <div class="finding should-fix">
+    <span class="tag should-fix">Should fix</span>
+    <strong>Partial progress discarded on rate-limit error mid-loop</strong>
+    <div class="loc"><code class="inline">pkg/dataloader/prowloader/prow.go:840-856</code></div>
+    <p>The old per-PR loop called <code class="inline">Save()</code> immediately per row, so a later
+    rate-limit error still left earlier rows durably updated. The new code accumulates all repos'
+    results into <code class="inline">allMerged</code> in memory and only writes once at the end. If
+    <code class="inline">ListRecentlyMergedPRs</code> hits a rate-limit error partway through the
+    <code class="inline">repos</code> loop, the function returns early and everything already
+    collected is discarded &mdash; nothing is persisted this cycle. Low severity since this loader
+    runs periodically and unprocessed rows are simply retried next cycle.</p>
+    <pre>for _, r := range repos {
+    merged, err := pl.githubClient.ListRecentlyMergedPRs(r.Org, r.Repo)
+    if err != nil {
+        if pl.githubClient.IsWithinRateLimitThreshold() {
+            return err
+        }
+        continue
+    }
+    ...
+}</pre>
+  </div>
+
+  <h3>Nits</h3>
+  <div class="finding nit">
+    <span class="tag nit">Nit</span>
+    <strong>Inconsistent join key between the two bulk statements</strong>
+    <div class="loc"><code class="inline">pkg/dataloader/prowloader/prow.go:895-908</code></div>
+    <p>The <code class="inline">UPDATE</code> joins the temp table to <code class="inline">prow_pull_requests</code>
+    on <code class="inline">sha</code> alone, while the <code class="inline">DELETE</code> a few lines
+    later joins <code class="inline">pull_request_comments</code> on the full
+    <code class="inline">(org, repo, number)</code> tuple. SHA collisions across repos are
+    practically impossible, so this isn't a correctness bug (and mirrors the original code's
+    SHA-only matching) &mdash; but the asymmetry within the same function is worth a comment or
+    aligning both on the full tuple.</p>
+    <pre>UPDATE prow_pull_requests p
+SET merged_at = t.merged_at, updated_at = NOW()
+FROM tmp_merged_prs t
+WHERE p.sha = t.sha AND p.merged_at IS NULL
+...
+DELETE FROM pull_request_comments c
+USING (SELECT DISTINCT org, repo, number FROM tmp_merged_prs) t
+WHERE c.org = t.org AND c.repo = t.repo AND c.pull_number = t.number
+    AND c.comment_type = $1</pre>
+  </div>
+
+  <h3>Questions</h3>
+  <div class="finding question">
+    <span class="tag question">Question</span>
+    <strong>Was the bulk backfill validated against prod-like data volume?</strong>
+    <div class="loc"><code class="inline">pkg/dataloader/prowloader/prow.go:810-910</code></div>
+    <p>First run after merge will attempt to set <code class="inline">merged_at</code> for the ~82%
+    of existing rows described in the PR body. The test plan covers unit tests and lint but doesn't
+    mention a dry run or row-count sanity check against a prod-like copy of
+    <code class="inline">prow_pull_requests</code>.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li>Core fix confirmed: <code class="inline">ListRecentlyMergedPRs</code> returns <code class="inline">Head.SHA</code>, not <code class="inline">MergeCommitSHA</code> — verified in code and asserted explicitly in the new test.</li>
+    <li><code class="inline">ClearPendingRecord</code>/<code class="inline">QueryPRPendingComments</code> (replaced by the bulk DELETE) only touch the DB, not the GitHub API — the bulk DELETE is behaviorally equivalent.</li>
+    <li><code class="inline">db.CopyToTempTable</code> + <code class="inline">stdlib.AcquireConn</code>/<code class="inline">ReleaseConn</code> usage matches the existing idiom already used in the same file (<code class="inline">findNewJobRunIDs</code>) and in <code class="inline">bugloader.go</code>/<code class="inline">releasesync.go</code>.</li>
+    <li><code class="inline">gofmt -l</code> is clean and <code class="inline">go build ./...</code> passes for all three changed files.</li>
+    <li>Removed <code class="inline">gorm</code> import is correctly unused elsewhere in the file (<code class="inline">gorm.io/gorm/clause</code> is imported separately and still used).</li>
+    <li>No BigQuery equivalent of <code class="inline">syncPRStatus</code>/<code class="inline">prow_pull_requests</code> exists, so the provider-parity project rule doesn't apply here.</li>
+    <li>SQL is parameterized (<code class="inline">$1</code> for <code class="inline">comment_type</code>); <code class="inline">CopyToTempTable</code> validates identifiers before building DDL.</li>
+    <li>New test covers not-merged PRs, missing <code class="inline">Head</code>, and cache reuse on second call.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Did you run this backfill (or a dry run) against a prod-like snapshot to confirm the expected ~82% of rows get <code class="inline">merged_at</code> set and nothing unexpected happens at that row count?</li>
+    <li>Is discarding the in-memory <code class="inline">allMerged</code> on a rate-limit error acceptable, or should we flush what's collected so far before returning?</li>
+  </ul>
+</section>
+
+</body>
+</html>
