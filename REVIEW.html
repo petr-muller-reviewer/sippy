@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3816</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1b1f23;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fff;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: #f6f8fa;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e1e4e8;
+  }
+  code.inline {
+    background: #f6f8fa;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #e1e4e8;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table {
+    border-collapse: collapse;
+  }
+  header td {
+    padding: 0.15rem 0.6rem 0.15rem 0;
+    vertical-align: top;
+  }
+  header td.key {
+    color: #57606a;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+    border-bottom: 1px solid #e1e4e8;
+    padding-bottom: 0.3rem;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.3em 0.8em;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.95em;
+  }
+  .verdict.approve { background: #dafbe1; color: #116329; }
+  .verdict.request-changes { background: #ffebe9; color: #82071e; }
+  .verdict.needs-discussion { background: #fff8c5; color: #7d4e00; }
+  .finding {
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .finding h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.02rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15em 0.55em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #ffebe9; color: #82071e; }
+  .badge.should-fix { background: #fff1cc; color: #7d4e00; }
+  .badge.nit { background: #eef1f4; color: #57606a; }
+  .badge.question { background: #ddf4ff; color: #0550ae; }
+  .loc { color: #57606a; font-size: 0.9em; margin: 0.3rem 0; }
+  ul.tight li { margin-bottom: 0.4rem; }
+  .hl { background: #fff8c5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3816</h1>
+  <table>
+    <tr><td class="key">Title</td><td>TRT-2822: Fix all no-unused-vars linter warnings in sippy frontend and enable error-level enforcement</td></tr>
+    <tr><td class="key">PR</td><td><a href="https://github.com/openshift/sippy/pull/3816">github.com/openshift/sippy/pull/3816</a></td></tr>
+    <tr><td class="key">Base</td><td><code class="inline">main</code></td></tr>
+    <tr><td class="key">Head SHA</td><td><code class="inline">43233802798a53daadc6e439114696b791b06412</code></td></tr>
+    <tr><td class="key">Reviewed at</td><td>2026-07-25T13:38:36Z</td></tr>
+  </table>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict approve">APPROVE</span></p>
+<p>This is a well-scoped, mechanical lint cleanup. Every parameter/variable rename I spot-checked was safe (ESLint had already confirmed those bindings were unused inside their scope), and the one genuine dead-code removal (in <code class="inline">ComponentReadiness.jsx</code>) leaves no orphaned references. The only real concern is a handful of places where entire dead functions/state (not just unused params) were underscore-prefixed rather than deleted, which is inconsistent with the cleanup precedent set elsewhere in the same PR — worth a follow-up pass but not a blocker.</p>
+
+<h2>What this PR does</h2>
+<ul class="tight">
+  <li>Fixes all 136 pre-existing <code class="inline">no-unused-vars</code> ESLint warnings across 64 sippy-ng files.</li>
+  <li>Prefixes unused function params, destructured values, and catch-clause errors with <code class="inline">_</code> to match the existing <code class="inline">argsIgnorePattern</code>/<code class="inline">varsIgnorePattern: '^_'</code> config, and adds a matching <code class="inline">caughtErrorsIgnorePattern</code>.</li>
+  <li>Removes some genuinely dead code (e.g. unused <code class="inline">useTheme()</code>/<code class="inline">useLocation()</code>/<code class="inline">useNavigate()</code> calls, and the copy-link feature in <code class="inline">ComponentReadiness.jsx</code>).</li>
+  <li>Flips <code class="inline">no-unused-vars</code> from <code class="inline">warn</code> to <code class="inline">error</code> to lock the rule in going forward.</li>
+  <li>No intended behavioral change anywhere in the diff.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="badge should-fix">should-fix</span>Dead functions/state prefixed with <code class="inline">_</code> instead of deleted</h3>
+  <p class="loc"><code>sippy-ng/src/component_readiness/{CompReadyEnvCapabilities,CompReadyEnvCapability,CompReadyEnvCapabilityTest,CompReadyVars,TestDetailsReport}.jsx</code>, <code>sippy-ng/src/releases/PayloadStream.jsx</code>, <code>sippy-ng/src/bugs/BugButton.jsx</code></p>
+  <p><code class="inline">_cancelFetch</code> is defined but never called in 5 files (confirmed via grep — no other occurrence of <code class="inline">cancelFetch</code> in each file). <code class="inline">PayloadStream.jsx</code> ships a complete dead tab-switching implementation — verified by reading the PR-head file that the <code class="inline">Tabs</code> component has no <code class="inline">onChange</code>/<code class="inline">value</code> wired to this state at all. <code class="inline">BugButton.jsx</code> has an entirely unused <code class="inline">[_open, _setOpen]</code> state pair. The PR already deletes genuinely dead code elsewhere (<code class="inline">ComponentReadiness.jsx</code>'s <code class="inline">copyPopoverEl</code>/<code class="inline">linkToReport</code>/<code class="inline">copyLinkToReport</code>/<code class="inline">currentPath</code>) — these should get the same treatment instead of underscore-prefixing, since they're vestigial dead code, not intentionally-unused parameters.</p>
+  <pre><span class="hl">const [_currentTab, _setCurrentTab] = useState(0)
+function _handleTabChange(_event, newValue) {
+  console.warn('Setting new value ' + newValue)
+  _setCurrentTab(newValue)
+}</span></pre>
+</div>
+
+<div class="finding">
+  <h3><span class="badge nit">nit</span>Inconsistent destructuring style for one unused-prop rename</h3>
+  <p class="loc"><code>sippy-ng/src/pull_requests/PullRequestsTable.jsx</code></p>
+  <p><code class="inline">const { classes } = props</code> became <code class="inline">const _classes = props.classes</code> instead of <code class="inline">const { classes: _classes } = props</code>, the pattern used everywhere else in this PR. Functionally identical, just a stylistic inconsistency.</p>
+  <pre>const _classes = props.classes</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="badge question">question</span>CI lint job is failing — is it unrelated to this PR?</h3>
+  <p class="loc"><code>ci/prow/lint</code> check on PR #3816</p>
+  <p>The lint job fails, but <code class="inline">npx eslint .</code> completes cleanly in the log (no errors printed) — the failure happens downstream in <code class="inline">npm audit --omit=dev</code>, flagging pre-existing <code class="inline">react-router</code> CVEs (GHSA-qwww-vcr4-c8h2). This matches unrelated recent commits on <code class="inline">main</code> about npm audit thresholds, but worth confirming with the author before merge that it's pre-existing and not this PR's responsibility.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="tight">
+  <li>All renamed <code class="inline">theme</code>/<code class="inline">props</code>/<code class="inline">index</code>/<code class="inline">event</code> params were only renamed where ESLint had already confirmed they were unused in the function body — safe.</li>
+  <li><code class="inline">ComponentReadiness.jsx</code> dead-code removal — grepped the PR-head file, no remaining references, no orphaned callers.</li>
+  <li><code class="inline">eslint.config.mjs</code> change (<code class="inline">caughtErrorsIgnorePattern: '^_'</code>, <code class="inline">warn</code>→<code class="inline">error</code>) is straightforward and matches the stated goal.</li>
+  <li><code class="inline">catch (e)</code> → <code class="inline">catch (_e)</code> renames in <code class="inline">helpers.jsx</code>/<code class="inline">FeatureGates.jsx</code> are consistent and low-risk.</li>
+  <li>No test changes — appropriate for a pure lint/rename cleanup with no behavioral change.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul class="tight">
+  <li>Should the <code class="inline">_cancelFetch</code> functions (6 occurrences), <code class="inline">PayloadStream</code>'s dead tab-switching code, and <code class="inline">BugButton</code>'s unused <code class="inline">open</code> state be deleted outright instead of underscore-prefixed, for consistency with the dead-code removal already done in <code class="inline">ComponentReadiness.jsx</code>?</li>
+  <li>Is the <code class="inline">ci/prow/lint</code> failure (npm audit / react-router CVE) already tracked/expected, or does it block this PR's merge?</li>
+</ul>
+
+</body>
+</html>
