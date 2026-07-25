@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3827</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e0e0e0;
+  }
+  code {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0 0 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  h2 {
+    font-size: 1.15rem;
+    border-bottom: 1px solid #e5e5e5;
+    padding-bottom: 0.3rem;
+    margin-top: 2rem;
+  }
+  .verdict {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.3em 0.8em;
+    border-radius: 6px;
+    background: #dff5df;
+    color: #1e6b1e;
+    border: 1px solid #b7e2b7;
+  }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+  .empty { color: #777; font-style: italic; }
+  .checked li::marker { content: "✓ "; color: #2a8a2a; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3827</h1>
+  <dl>
+    <dt>Title</dt><dd>NO-JIRA: Fix chart imports</dd>
+    <dt>Head SHA</dt><dd><code>4b883318950ca4e07f238d117a65ef82ad15d19a</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-25T16:32:59Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3827">github.com/openshift/sippy/pull/3827</a></dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict">Approve</span></p>
+<p>Small, targeted, additive-only bugfix. Verified the registered Chart.js building blocks cover every chart type actually used in the codebase (<code>Line</code> and <code>Doughnut</code>), and that <code>annotationPlugin</code> is genuinely consumed elsewhere. No behavior change beyond fixing the crash; no risk found.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code>sippy-ng/src/chartSetup.jsx</code>, a side-effect module that calls <code>Chart.register(...)</code> for the controllers, elements, scales, and plugins the app's charts need (<code>ArcElement</code>, <code>CategoryScale</code>, <code>DoughnutController</code>, <code>Filler</code>, <code>Legend</code>, <code>LinearScale</code>, <code>LineController</code>, <code>LineElement</code>, <code>PointElement</code>, <code>TimeScale</code>, <code>Title</code>, <code>Tooltip</code>, plus <code>chartjs-plugin-annotation</code>).</li>
+  <li>Imports that module for its side effect at the very top of <code>App.jsx</code> so registration happens before any chart renders.</li>
+  <li>Fixes the runtime error <code>Error: "arc" is not a registered element.</code>, most likely surfaced by the recent Vite migration — Chart.js v3's tree-shakeable build requires explicit registration, which the old bundling setup may have papered over.</li>
+</ul>
+
+<h2>Findings</h2>
+<p class="empty">No blocking issues, should-fix items, or nits found.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>Every chart type actually rendered in the app — <code>Line</code> (in <code>BuildClusterHealthChart.jsx</code>, <code>JobStackedChart.jsx</code>, <code>JobAnalysis.jsx</code>, <code>TestStackedChart.jsx</code>, <code>TestPassRateCharts.jsx</code>, <code>TestDurationChart.jsx</code>) and <code>Doughnut</code> (<code>SummaryCard.jsx</code>) — has every required chart.js building block present in the registered list.</li>
+  <li>No other chart types (<code>Bar</code>, <code>Pie</code>, <code>Scatter</code>, <code>Radar</code>, etc.) exist anywhere in <code>sippy-ng/src</code>, so the registration list isn't under-inclusive.</li>
+  <li><code>annotationPlugin</code> is genuinely used (<code>prow_job_runs/IntervalsChart.jsx</code>, <code>tests/FeatureGateDetail.jsx</code>), not dead registration.</li>
+  <li>No duplicate <code>Chart.register</code> calls elsewhere in the codebase that this could conflict with.</li>
+  <li>Import ordering in <code>App.jsx</code> preserved — <code>./chartSetup</code> sorts alphabetically before <code>./components/...</code>.</li>
+  <li>Registration is idempotent and global; registering elements not strictly needed today carries no real downside.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li><code>chartSetup.jsx</code> contains no JSX — was <code>.js</code> considered, or is <code>.jsx</code> the deliberate convention for all files under <code>src</code>?</li>
+  <li>Existing tests mock <code>react-chartjs-2</code> via <code>setupTests.jsx</code>, so this exact bug class (a missing <code>Chart.register</code> call) wouldn't have been caught by the test suite. Worth a lightweight smoke test that mounts a real chart component through actual Chart.js, so a future chart type added without updating this file fails in CI instead of production?</li>
+</ul>
+
+</body>
+</html>
