@@ -3,8 +3,13 @@ pr: openshift/sippy#3816
 title: "TRT-2822: Fix all no-unused-vars linter warnings in sippy frontend and enable error-level enforcement"
 head_sha: 43233802798a53daadc6e439114696b791b06412
 base: main
-reviewed_at: 2026-07-25T13:38:36Z
+reviewed_at: 2026-07-25T21:32:53Z
 verdict: approve
+refresh_log:
+  - from_sha: 43233802798a53daadc6e439114696b791b06412
+    to_sha: 43233802798a53daadc6e439114696b791b06412
+    at: 2026-07-25T21:32:53Z
+    summary: No code changes. smg247 commented /retest; ci/prow/lint now passes (was previously failing on npm audit react-router CVE against a stale main base). Resolves the open question about the lint failure.
 ---
 
 ## Summary
@@ -30,9 +35,12 @@ Mechanical cleanup across 64 sippy-ng files fixing all 136 `no-unused-vars` ESLi
 - excerpt: |
     const _classes = props.classes
 
+## Resolved
+
 ### [question] CI lint job is failing — unrelated to this PR's changes?
 - where: `ci/prow/lint` check on PR #3816
-- concern: The lint job fails, but `npx eslint .` completes cleanly in the log (no errors printed) — the failure is downstream in `npm audit --omit=dev` flagging pre-existing `react-router` CVEs (GHSA-qwww-vcr4-c8h2), matching the unrelated recent main-branch commits about npm audit thresholds. Worth confirming with the author/CI owner that this is pre-existing and not something this PR needs to fix before merge.
+- concern: The lint job failed, but `npx eslint .` completed cleanly in the log (no errors printed) — the failure was downstream in `npm audit --omit=dev` flagging pre-existing `react-router` CVEs (GHSA-qwww-vcr4-c8h2), matching the unrelated recent main-branch commits about npm audit thresholds.
+- resolution: Confirmed unrelated to this PR. After a `/retest` (smg247, 2026-07-25T18:26:29Z) re-ran against a newer `main` base (`1c5aaf7ea5ee2c928ab67d586c150fa25442c044`), `ci/prow/lint` now passes. All CI checks are green except `ci/prow/e2e` (pending) and `tide` (pending merge-label gate).
 
 ## Checked
 - All renamed `theme`/`props`/`index`/`event` params were only renamed where ESLint had already confirmed they were unused in the function body — safe.
@@ -43,4 +51,3 @@ Mechanical cleanup across 64 sippy-ng files fixing all 136 `no-unused-vars` ESLi
 
 ## Open questions
 - Should the `_cancelFetch` functions (6 occurrences), `PayloadStream`'s dead tab-switching code, and `BugButton`'s unused `open` state be deleted outright instead of underscore-prefixed, for consistency with the dead-code removal already done in `ComponentReadiness.jsx`?
-- Is the `ci/prow/lint` failure (npm audit / react-router CVE) already tracked/expected, or does it block this PR's merge?

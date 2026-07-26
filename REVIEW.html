@@ -102,8 +102,9 @@
     <tr><td class="key">PR</td><td><a href="https://github.com/openshift/sippy/pull/3816">github.com/openshift/sippy/pull/3816</a></td></tr>
     <tr><td class="key">Base</td><td><code class="inline">main</code></td></tr>
     <tr><td class="key">Head SHA</td><td><code class="inline">43233802798a53daadc6e439114696b791b06412</code></td></tr>
-    <tr><td class="key">Reviewed at</td><td>2026-07-25T13:38:36Z</td></tr>
+    <tr><td class="key">Reviewed at</td><td>2026-07-25T21:32:53Z</td></tr>
   </table>
+  <p class="loc">Refresh 2026-07-25T21:32:53Z: no code changes (head SHA unchanged). smg247 commented <code class="inline">/retest</code>; <code class="inline">ci/prow/lint</code> now passes.</p>
 </header>
 
 <h2>Verdict</h2>
@@ -139,10 +140,13 @@ function _handleTabChange(_event, newValue) {
   <pre>const _classes = props.classes</pre>
 </div>
 
+<h2>Resolved</h2>
+
 <div class="finding">
-  <h3><span class="badge question">question</span>CI lint job is failing — is it unrelated to this PR?</h3>
+  <h3><span class="badge question">question</span>CI lint job was failing — unrelated to this PR?</h3>
   <p class="loc"><code>ci/prow/lint</code> check on PR #3816</p>
-  <p>The lint job fails, but <code class="inline">npx eslint .</code> completes cleanly in the log (no errors printed) — the failure happens downstream in <code class="inline">npm audit --omit=dev</code>, flagging pre-existing <code class="inline">react-router</code> CVEs (GHSA-qwww-vcr4-c8h2). This matches unrelated recent commits on <code class="inline">main</code> about npm audit thresholds, but worth confirming with the author before merge that it's pre-existing and not this PR's responsibility.</p>
+  <p>The lint job had failed, but <code class="inline">npx eslint .</code> completed cleanly in the log (no errors printed) — the failure was downstream in <code class="inline">npm audit --omit=dev</code>, flagging pre-existing <code class="inline">react-router</code> CVEs (GHSA-qwww-vcr4-c8h2), matching unrelated recent commits on <code class="inline">main</code> about npm audit thresholds.</p>
+  <p><strong>Resolution:</strong> confirmed unrelated to this PR. After a <code class="inline">/retest</code> (smg247, 2026-07-25T18:26:29Z) re-ran against a newer <code class="inline">main</code> base (<code class="inline">1c5aaf7ea5ee2c928ab67d586c150fa25442c044</code>), <code class="inline">ci/prow/lint</code> now passes. All checks are green except <code class="inline">ci/prow/e2e</code> (pending) and <code class="inline">tide</code> (pending merge-label gate).</p>
 </div>
 
 <h2>Things I checked and was fine with</h2>
@@ -157,7 +161,6 @@ function _handleTabChange(_event, newValue) {
 <h2>Open questions for the author</h2>
 <ul class="tight">
   <li>Should the <code class="inline">_cancelFetch</code> functions (6 occurrences), <code class="inline">PayloadStream</code>'s dead tab-switching code, and <code class="inline">BugButton</code>'s unused <code class="inline">open</code> state be deleted outright instead of underscore-prefixed, for consistency with the dead-code removal already done in <code class="inline">ComponentReadiness.jsx</code>?</li>
-  <li>Is the <code class="inline">ci/prow/lint</code> failure (npm audit / react-router CVE) already tracked/expected, or does it block this PR's merge?</li>
 </ul>
 
 </body>
