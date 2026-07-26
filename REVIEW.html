@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3790</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .meta {
+    color: #555;
+    font-size: 0.92em;
+    margin-bottom: 1.5rem;
+  }
+  .meta code { background: none; padding: 0; }
+  .verdict-box {
+    background: #fff8e1;
+    border-left: 4px solid #f5a623;
+    padding: 0.9rem 1.2rem;
+    border-radius: 4px;
+  }
+  .verdict-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.03em;
+    color: #8a5a00;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left: 5px solid #c0392b; }
+  .finding.should-fix { border-left: 5px solid #d68910; }
+  .finding.nit { border-left: 5px solid #7f8c8d; }
+  .finding.question { border-left: 5px solid #2874a6; }
+  .sev {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .sev.blocking { background: #c0392b; }
+  .sev.should-fix { background: #d68910; }
+  .sev.nit { background: #7f8c8d; }
+  .sev.question { background: #2874a6; }
+  .loc { color: #666; font-size: 0.88em; }
+  .refresh-note {
+    background: #eef6fc;
+    border-left: 4px solid #2874a6;
+    padding: 0.75rem 1.1rem;
+    border-radius: 4px;
+    font-size: 0.92em;
+    margin-bottom: 1.5rem;
+  }
+  .status-new { color: #2874a6; font-weight: 600; }
+  .status-unresolved { color: #999; font-weight: 600; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.35rem; }
+  a { color: #2874a6; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3790</h1>
+<div class="meta">
+  <div><strong>Title:</strong> Add analyze-db.sh script for post-restore database warmup</div>
+  <div><strong>Base:</strong> <code class="inline">main</code></div>
+  <div><strong>Head SHA:</strong> <code class="inline">12f9de7d69562af7757e3edfb64de4b9f694f0c6</code></div>
+  <div><strong>Reviewed at:</strong> 2026-07-25T16:40:18Z</div>
+  <div><a href="https://github.com/openshift/sippy/pull/3790">View on GitHub</a></div>
+</div>
+
+<div class="refresh-note">
+  <strong>Refreshed</strong> from <code class="inline">42b6154a5</code> &rarr; <code class="inline">12f9de7d6</code> (force-pushed rebase; file diff is small and targeted). Script scope expanded from ANALYZE-only to a two-step "warmup": <code class="inline">ANALYZE VERBOSE</code> followed by <code class="inline">REINDEX DATABASE CONCURRENTLY sippy_openshift</code>, run via a new <code class="inline">sh -c</code> multi-statement command. <code class="inline">--wait</code> timeout raised 30m&rarr;120m. PR is now <code class="inline">approved</code> (author self-approve) with green CI; description/test plan still describe only the original ANALYZE-only behavior. All prior findings remain unresolved; two new should-fix/nit findings surfaced by the REINDEX addition.
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <div class="verdict-label">Needs discussion</div>
+  <p>The core script remains small and follows the repo's existing shell-script conventions. The WIP label and self-approval suggest the author considers this ready, but the operational rough edges from prior reviews are still present — the hardcoded <code class="inline">:latest</code> image tag, an uninformative <code class="inline">--dry-run</code>, and the default-secret question — and the new REINDEX step adds a hardcoded database name and a more fragile, triple-escaped shell command. Nothing here is a proven correctness blocker (the escaping was hand-verified correct), but the hardcoded database name is a real failure mode if this script is ever pointed at a differently-named database.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code class="inline">scripts/analyze-db.sh</code>, which runs a post-restore "warmup" &mdash; <code class="inline">ANALYZE VERBOSE</code> followed by <code class="inline">REINDEX DATABASE CONCURRENTLY</code> &mdash; against the Sippy database via an <code class="inline">oc run</code> pod.</li>
+  <li>Supports <code class="inline">--namespace</code>, <code class="inline">--db-secret</code>, <code class="inline">--wait</code>, and <code class="inline">--dry-run</code> flags, defaulting to the <code class="inline">sippy</code> namespace and <code class="inline">postgres-aws</code> secret.</li>
+  <li>Hardens <code class="inline">scripts/backfill-summaries.sh</code>'s argument parser so every flag that takes a value now errors clearly if the value is missing, instead of silently swallowing the next argument or a positional string.</li>
+  <li>Documents the new script's purpose, defaults, overrides, and the ANALYZE+REINDEX rationale (stale planner stats plus lazy-loaded EBS storage) in the root <code class="inline">README.md</code>.</li>
+  <li><em>Since previous review:</em> pod command switched to <code class="inline">sh -c</code> to sequence a second <code class="inline">psql</code> call running <code class="inline">REINDEX DATABASE CONCURRENTLY sippy_openshift</code>; <code class="inline">--wait</code> timeout raised from 30m to 120m; PR self-approved with green CI, but its description/test plan weren't updated for the REINDEX addition.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <h3><span class="sev should-fix">should-fix</span>Hardcoded <code class="inline">:latest</code> image tag with no override <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:18</code></div>
+  <p><code class="inline">IMAGE="registry.redhat.io/rhel9/postgresql-16:latest"</code> is still hardcoded with no <code class="inline">--image</code> override, unlike the sibling <code class="inline">backfill-summaries.sh</code>, which auto-detects the image from the running <code class="inline">sippy</code> DC or accepts <code class="inline">--image</code>. This isn't reproducible across runs and offers no escape hatch if the target environment's PG major version or registry access differs.</p>
+  <pre>IMAGE="registry.redhat.io/rhel9/postgresql-16:latest"
+
+oc -n "$NAMESPACE" run "$POD_NAME" --restart=Never \
+    --image="$IMAGE" \</pre>
+</div>
+
+<div class="finding should-fix">
+  <h3><span class="sev should-fix">should-fix</span><code class="inline">--dry-run</code> output is uninformative <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:39-42</code></div>
+  <p>Dry-run text was updated to mention the new step ("...to run ANALYZE VERBOSE and REINDEX") but still omits the namespace, secret, and image, so it still doesn't let an operator verify the invocation before running it for real &mdash; more important now that the pod also runs a REINDEX.</p>
+  <pre>if [[ "$DRY_RUN" == "true" ]]; then
+    echo "Would create pod $POD_NAME to run ANALYZE VERBOSE and REINDEX"
+    exit 0
+fi</pre>
+</div>
+
+<div class="finding should-fix">
+  <h3><span class="sev should-fix">should-fix</span>Hardcoded database name in REINDEX, unlike the parameterized DSN <span class="status-new">(new)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:56</code></div>
+  <p><code class="inline">REINDEX DATABASE CONCURRENTLY sippy_openshift;</code> hardcodes the database name while everything else (namespace, secret, DSN) is parameterized. Postgres requires <code class="inline">REINDEX DATABASE</code> to name the currently-connected database, so a DSN whose database isn't literally named <code class="inline">sippy_openshift</code> would fail this statement while the preceding <code class="inline">ANALYZE VERBOSE</code> (no name required) succeeds &mdash; a confusing partial failure.</p>
+  <pre>"args": ["echo 'Starting ANALYZE VERBOSE...' && psql \"$SIPPY_DATABASE_DSN\" -c 'ANALYZE VERBOSE;' &&
+  echo 'Starting REINDEX DATABASE...' && psql \"$SIPPY_DATABASE_DSN\" -c 'REINDEX DATABASE CONCURRENTLY sippy_openshift;' &&
+  echo 'Warmup complete.'"]</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="sev nit">nit</span>Triple-nested string escaping for the pod command is fragile to review <span class="status-new">(new)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:55-56</code></div>
+  <p>The <code class="inline">sh -c</code> argument is escaped through three layers (bash double-quoted string &rarr; JSON string &rarr; shell metacharacters) to sequence two <code class="inline">psql</code> calls with <code class="inline">&&</code>/<code class="inline">echo</code>. I hand-traced the escaping and it is currently correct &mdash; but this is exactly the kind of construct where one missed backslash silently breaks quoting instead of erroring. Worth a comment on the escaping layers, or moving to a heredoc/ConfigMap to reduce depth.</p>
+  <pre>"command": ["sh", "-c"],
+"args": ["echo 'Starting ANALYZE VERBOSE...' && psql \"$SIPPY_DATABASE_DSN\" -c 'ANALYZE VERBOSE;' && ..."]</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="sev nit">nit</span>Pod no longer self-removes; litter accumulates without <code class="inline">--wait</code> <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:36,44</code></div>
+  <p><code class="inline">--rm</code> is still dropped, so a run without <code class="inline">--wait</code> leaves the pod (running, then completed) in the namespace indefinitely &mdash; cleaned up only by the next invocation's delete-before-create step, or manually. Presumably intentional (README explains detached mode is for long warmup runs where the local machine shouldn't need to stay connected), but there's still no automatic GC and no mention of the tradeoff in the dry-run/help text.</p>
+  <pre>POD_NAME="sippy-analyze-db"
+IMAGE="registry.redhat.io/rhel9/postgresql-16:latest"
+...
+oc -n "$NAMESPACE" run "$POD_NAME" --restart=Never \</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="sev nit">nit</span>Static pod name can still race under concurrent use <span class="status-unresolved">(unresolved, now more consequential)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:36,44</code></div>
+  <p><code class="inline">POD_NAME="sippy-analyze-db"</code> is still static. Now that the pod isn't <code class="inline">--rm</code>'d, a re-run while a prior detached run is still in progress collides more visibly: the delete-before-create step kills the in-flight ANALYZE+REINDEX from the previous invocation.</p>
+  <pre>POD_NAME="sippy-analyze-db"
+...
+oc -n "$NAMESPACE" delete pod "$POD_NAME" --ignore-not-found --wait >/dev/null 2>&1 || true</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="sev nit">nit</span>Delete step still swallows all errors, not just not-found <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:44</code></div>
+  <p><code class="inline">--ignore-not-found</code> already makes a missing pod a non-error; the trailing <code class="inline">|| true</code> still hides real failures (e.g. expired <code class="inline">oc</code> auth), letting the script proceed silently into <code class="inline">oc run</code>, where the failure then resurfaces less clearly.</p>
+  <pre>oc -n "$NAMESPACE" delete pod "$POD_NAME" --ignore-not-found --wait >/dev/null 2>&1 || true</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="sev nit">nit</span><code class="inline">oc wait</code> failure path suppresses its own stderr <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:67-72</code></div>
+  <p><code class="inline">oc ... wait ... 2&gt;/dev/null || { ... }</code> discards the wait command's own error output (e.g. a propagation delay right after creation, or an RBAC error on watch), relying entirely on the fallback <code class="inline">oc get pod</code> status check. Most failure modes are covered by the fallback, but a wait-specific error (malformed jsonpath, permission denied) would be silently dropped. Timeout was raised 30m&rarr;120m in this update, unrelated to the stderr-suppression concern.</p>
+  <pre>oc -n "$NAMESPACE" wait --for=jsonpath='{.status.phase}'=Succeeded --timeout=120m "pod/$POD_NAME" 2>/dev/null || {
+    STATUS=$(oc -n "$NAMESPACE" get pod "$POD_NAME" -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+    echo "Pod finished with status: $STATUS" >&2
+    oc -n "$NAMESPACE" logs "$POD_NAME" --tail=20 2>/dev/null || true
+    exit 1
+}</pre>
+</div>
+
+<div class="finding question">
+  <h3><span class="sev question">question</span>Is <code class="inline">postgres-aws</code> the right default secret, and should it be required? <span class="status-unresolved">(unresolved)</span></h3>
+  <div class="loc"><code class="inline">scripts/analyze-db.sh:22</code></div>
+  <p><code class="inline">backfill-summaries.sh</code> requires <code class="inline">--db-secret</code> with no default (errors if unset); <code class="inline">analyze-db.sh</code> still silently defaults to <code class="inline">postgres-aws</code>. Worth confirming this default is intentional and correct for the target environment, rather than a divergence from the sibling script's stricter pattern.</p>
+  <pre>DB_SECRET="postgres-aws"</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Hand-traced the new triple-escaped <code class="inline">sh -c</code> args string end to end (bash &rarr; JSON &rarr; container shell): it decodes correctly to <code class="inline">psql "$SIPPY_DATABASE_DSN" -c 'ANALYZE VERBOSE;' && ... psql "$SIPPY_DATABASE_DSN" -c 'REINDEX DATABASE CONCURRENTLY sippy_openshift;'</code>, with the DSN properly double-quoted inside the container's shell. No injection or quoting bug found (see fragility nit above, though).</li>
+  <li><code class="inline">REINDEX DATABASE CONCURRENTLY</code> is valid Postgres 12+ syntax and avoids the exclusive lock a plain <code class="inline">REINDEX DATABASE</code> would take — consistent with wanting this safe to run against a live-ish staging DB.</li>
+  <li>Credentials flow through <code class="inline">secretKeyRef</code> into the pod's env rather than being baked into the manifest, consistent with <code class="inline">restore_prodlike_db.sh</code>. Unchanged.</li>
+  <li>The <code class="inline">backfill-summaries.sh</code> flag-parsing fix (<code class="inline">[[ $# -ge 2 ]]</code> guards) is consistent with the file's existing style and error-message convention; unchanged by this refresh.</li>
+  <li><code class="inline">--wait</code> timeout bump 30m&rarr;120m is a sensible adjustment given REINDEX CONCURRENTLY on a full database can run substantially longer than ANALYZE alone.</li>
+  <li>README addition/update is clear, matches the project's existing style (no header-heavy formatting, no em dashes), and now explains the EBS-lazy-loading rationale for REINDEX.</li>
+  <li>No unresolved human review threads; only CI/bot comments since the last review (self-approval notice, test scheduling, all tests passed on 2026-07-25).</li>
+  <li>PR description/test plan is stale (still describes ANALYZE-only, no mention of REINDEX or <code class="inline">--wait</code>) — noted as an open question below, not a code finding.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li><code class="inline">REINDEX DATABASE CONCURRENTLY sippy_openshift</code> hardcodes the database name — will this script ever be pointed at a DSN/secret whose database isn't named exactly <code class="inline">sippy_openshift</code>? If not, this is fine; if so, it needs to derive the name from the DSN or a flag.</li>
+  <li>Should <code class="inline">--image</code> be added to <code class="inline">analyze-db.sh</code> for parity with <code class="inline">backfill-summaries.sh</code>'s auto-detect/override pattern, and should the tag be pinned instead of <code class="inline">:latest</code>?</li>
+  <li>Should <code class="inline">--dry-run</code> print the full resolved <code class="inline">oc run</code> invocation (namespace, secret, image, and now the two-statement SQL) instead of just the pod name?</li>
+  <li>Is the <code class="inline">postgres-aws</code> default secret name confirmed correct, and should <code class="inline">--db-secret</code> be required the way it is in <code class="inline">backfill-summaries.sh</code>?</li>
+  <li>Now that the pod isn't <code class="inline">--rm</code>'d, is leftover-pod accumulation (when <code class="inline">--wait</code> isn't used) acceptable, or should the script warn about it / offer a cleanup flag?</li>
+  <li>Is the static <code class="inline">POD_NAME</code> collision risk (now more consequential since detached runs can be killed by a subsequent invocation, and runs are longer with REINDEX added) acceptable given expected usage patterns?</li>
+  <li>Can the PR description/test plan be updated to reflect the REINDEX step and <code class="inline">--wait</code> flag before merge?</li>
+</ul>
+
+</body>
+</html>
