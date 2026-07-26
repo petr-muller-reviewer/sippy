@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3830</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; background: #fff; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; background: #f4f4f5; border-radius: 4px; }
+  code { padding: 0.1em 0.35em; font-size: 0.92em; }
+  pre { padding: 0.8em 1em; overflow-x: auto; font-size: 0.88em; }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #e5e5e5; padding-bottom: 0.5rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #e5e5e5; padding-bottom: 0.3rem; }
+  .meta { background: #f9f9fb; border: 1px solid #e5e5e5; border-radius: 6px; padding: 1rem 1.2rem; font-size: 0.92rem; }
+  .meta dt { font-weight: 600; display: inline-block; width: 110px; color: #555; }
+  .meta dd { display: inline; margin: 0; }
+  .meta div { margin-bottom: 0.3rem; }
+  .verdict { border-radius: 6px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  .verdict.approve { background: #eafaf0; border: 1px solid #a6e9c0; }
+  .finding { border: 1px solid #e5e5e5; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .finding h3 { margin-top: 0; font-size: 1.02rem; }
+  .sev { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 4px; padding: 0.15em 0.6em; margin-right: 0.5em; }
+  .sev.blocking { background: #fde2e2; color: #a11; }
+  .sev.should-fix { background: #fff2d9; color: #955700; }
+  .sev.nit { background: #eef1f6; color: #445; }
+  .sev.question { background: #e6f0fb; color: #1b5e9e; }
+  .loc { color: #555; font-size: 0.88rem; margin-bottom: 0.5rem; }
+  ul { padding-left: 1.4rem; }
+  a { color: #1b5e9e; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy #3830</h1>
+<div class="meta">
+  <div><dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3830">openshift/sippy#3830</a></dd></div>
+  <div><dt>Title</dt><dd>INTEROP-9255: Register ACM+Virt interop jobs in Sippy</dd></div>
+  <div><dt>Head SHA</dt><dd><code>80787a500e216179f813c2c8894e0f1072c56f6c</code></dd></div>
+  <div><dt>Base</dt><dd><code>main</code></dd></div>
+  <div><dt>Reviewed</dt><dd>2026-07-26T11:24:39Z</dd></div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict approve">
+  <strong>Approve.</strong> The change is small, correctly ordered (new patterns precede the generic <code>-virt</code>/<code>-cnv</code> fallbacks and win first-match), and consistent with existing view/pattern conventions. Main gaps are missing dedicated test coverage and a couple of open questions about scope/readiness that don't block merge but should be confirmed with the author.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds two substring patterns (<code>-acm-cnv-</code>, <code>-acm-virt-</code>) to <code>layeredProductPatterns</code> in <code>pkg/variantregistry/ocp.go</code>, placed before the generic <code>-virt</code>/<code>-cnv</code> entries so ACM+Virt interop jobs get their own <code>lp-interop--acm-virt</code> classification.</li>
+  <li>Adds a new Component Readiness dashboard view, <code>4.22-LP-Interop--lpMainline</code>, filtered by <code>Owner: mpiit</code> and <code>Network: ovn</code> with an any-value <code>LayeredProduct</code> filter.</li>
+  <li>Regenerates <code>pkg/variantregistry/snapshot.yaml</code>, reclassifying one existing job from <code>virt</code> to <code>lp-interop--acm-virt</code>.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="sev should-fix">should-fix</span>No dedicated test case for new patterns</h3>
+  <div class="loc"><code>pkg/variantregistry/ocp_test.go</code></div>
+  <p>No <code>TestExtractVariants</code> case exercises a job name matching <code>-acm-cnv-</code> or <code>-acm-virt-</code>. Coverage for this table is inconsistent already (<code>-coo-</code> also lacks one), but several other patterns do have dedicated cases, and project conventions favor table-driven coverage for new classification logic. A single new case would lock in the behavior and catch future pattern-ordering regressions.</p>
+  <pre>{"-coo-", "lp-interop-coo"},
+{"-acm-cnv-", "lp-interop--acm-virt"},
+{"-acm-virt-", "lp-interop--acm-virt"},
+{"-virt", "virt"},
+{"-cnv", "virt"},</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev question">question</span><code>-acm-cnv-</code> job not yet present in snapshot.yaml</h3>
+  <div class="loc"><code>pkg/variantregistry/snapshot.yaml</code></div>
+  <p>Only the live-migration job was reclassified in the snapshot; the P2P upgrade job (<code>-acm-cnv-</code> pattern) mentioned in the PR description doesn't appear at all. Likely means it hasn't run/synced yet &mdash; worth confirming the real job name matches once it exists.</p>
+  <pre>periodic-ci-RedHatQE-interop-testing-master-acm-virt-ocp4.22-p2p-cclm-liv-mig-lp-interop-aws:
+    LayeredProduct: lp-interop--acm-virt</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev question">question</span><code>LayeredProduct: []</code> (match-any) filter in new view</h3>
+  <div class="loc"><code>config/views.yaml:1645-1689</code> (<code>4.22-LP-Interop--lpMainline</code>)</div>
+  <p>Sibling views (e.g. <code>4.22-LP-OCP-Compat--lpMainline</code>) scope <code>include_variants.LayeredProduct</code> to a specific product value; this view uses <code>[]</code> (any), relying only on <code>Owner: mpiit</code> + <code>Network: ovn</code> to narrow scope. Likely intentional as an umbrella LP-Interop view, but it will silently absorb any future <code>mpiit</code>-owned lp-interop product added under <code>ovn</code>.</p>
+  <pre>include_variants:
+  LayeredProduct: []
+  Network:
+  - ovn
+  Owner:
+  - mpiit</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev nit">nit</span>PR carries <code>do-not-merge/work-in-progress</code> label</h3>
+  <div class="loc">PR metadata</div>
+  <p>Flag before merge. The PR description also references two companion PRs (openshift/release#82108, ci-test-mapping#786) whose merge/readiness state should be confirmed &mdash; this change is inert until those land.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Pattern ordering: new entries precede generic <code>-virt</code>/<code>-cnv</code>, and <code>setLayeredProduct</code> returns on first match, so no fallback-to-generic risk.</li>
+  <li>Both target job names (from the PR description) contain the new substrings and also <code>-lp-interop-</code>, so <code>setOwner</code> still correctly assigns <code>mpiit</code>.</li>
+  <li>New view's YAML shape (release windows, <code>advanced_options</code>, <code>regression_tracking</code>, <code>prime_cache</code>) matches sibling <code>4.22-LP-*</code> views.</li>
+  <li>No gofmt/lint issues visible in the diff.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Has the <code>-acm-cnv-</code> (P2P upgrade) job started reporting yet, or is its absence from <code>snapshot.yaml</code> expected at this point?</li>
+  <li>Is the <code>LayeredProduct: []</code> match-any filter on the new view intentional as a durable "catch all mpiit lp-interop" view, or should it be scoped explicitly to <code>lp-interop--acm-virt</code> (and <code>lp-interop-coo</code>)?</li>
+  <li>Are openshift/release#82108 and ci-test-mapping#786 merged/ready to go out together with this?</li>
+</ul>
+
+</body>
+</html>
