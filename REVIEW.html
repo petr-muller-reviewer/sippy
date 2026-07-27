@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3829</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  code, pre, .mono {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f6f8fa;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e1e4e8;
+  }
+  header {
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    margin: 0.5rem 0;
+  }
+  header dt { color: #666; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2.2rem; }
+  h3 { font-size: 1.0rem; margin-bottom: 0.3rem; }
+  .verdict-box {
+    background: #fff8e1;
+    border: 1px solid #f0d878;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+  }
+  .verdict-label {
+    display: inline-block;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.85em;
+    letter-spacing: 0.04em;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    background: #f5a623;
+    color: #3a2a00;
+    margin-bottom: 0.6rem;
+  }
+  .finding {
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding h3 { margin-top: 0; }
+  .sev {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .sev-blocking { background: #ffdce0; color: #86181d; }
+  .sev-should-fix { background: #fff5c2; color: #735c0f; }
+  .sev-nit { background: #e3f2fd; color: #0b4a7a; }
+  .sev-question { background: #eee; color: #444; }
+  .loc { color: #555; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  .hl { background: #fff3b0; padding: 0 2px; }
+  a { color: #0969da; }
+  .scope-note {
+    background: #f6f8fa;
+    border-left: 4px solid #999;
+    padding: 0.8rem 1rem;
+    margin: 1rem 0;
+    font-size: 0.95em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>openshift/sippy#3829</h1>
+  <div>[WIP] TRT-2833: Add integration test tier for PostgreSQL-backed API methods</div>
+  <dl>
+    <dt>Head SHA</dt><dd class="mono">73738baf8303a4e7d9e14922d690fcae68123411</dd>
+    <dt>Base</dt><dd class="mono">main</dd>
+    <dt>Reviewed at</dt><dd class="mono">2026-07-26T12:22:39Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3829">github.com/openshift/sippy/pull/3829</a></dd>
+  </dl>
+</header>
+
+<div class="scope-note">
+<strong>Scope note:</strong> <code>gh pr diff</code> reports 1090 changed files / 129,530 additions
+because the head branch (<code>worktree-polished-dreaming-lagoon</code>) is stale relative to
+<code>main</code> and hasn't been rebased &mdash; most of the reported diff is unrelated drift
+(vendor dependency churn, <code>.js</code>&rarr;<code>.jsx</code> renames from other merged PRs).
+The true authored diff, isolated against the actual merge-base
+(<code>1c5aaf7ea5ee2c928ab67d586c150fa25442c044</code>), is 16 non-vendor files (~760 lines):
+<code>Makefile</code>, <code>go.mod</code>/<code>go.sum</code>, doc files, <code>.gitignore</code>,
+<code>pkg/db/functions.go</code>, <code>pkg/db/query/build_clusters.go</code>,
+<code>pkg/db/query/job_queries.go</code>, and three new files under <code>test/integration/</code>.
+This review covers that actual diff.
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <span class="verdict-label">Needs discussion</span>
+  <p>The actual code change &mdash; a new integration test tier plus two genuine SQL bug fixes it
+  uncovered &mdash; is solid, well-tested, and idiomatic. But the PR can't be reviewed or merged
+  as-is on GitHub (diff too large due to a stale branch), it's marked WIP, and CI wiring for the
+  new <code>make integration</code> target isn't visible in this diff. Rebase onto current
+  <code>main</code> and confirm CI container support before merge.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>make integration</code> tier: spins up a real Postgres container via
+  <code>testcontainers-go</code> (with Podman auto-detection), runs SQL-level tests against it.</li>
+  <li><code>test/integration/util/testdb.go</code> manages container lifecycle and per-test DB
+  cloning via <code>CREATE DATABASE ... TEMPLATE</code>.</li>
+  <li><code>test/integration/util/schema.go</code> builds a minimal integration schema (skips
+  partitioning, matviews, triggers, GIN indexes) plus the two custom SQL functions
+  (<code>job_results</code>, <code>test_results</code>).</li>
+  <li>Adds <code>TestProwJobSimilarName</code>, <code>TestVariantReports</code>,
+  <code>TestJobReports</code>.</li>
+  <li>Fixes two real SQL bugs the new tests caught: a <code>previous_failures</code>/
+  <code>previous_fails</code> column-name mismatch (always scanned as zero), and boundary
+  double-counting from using <code>BETWEEN</code> for both adjacent time windows.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">Should fix</span>Stale branch inflates PR diff to 1090 files</h3>
+  <div class="loc">PR head vs <code>main</code> (merge-base <code>1c5aaf7ea</code> vs current <code>main</code> at <code>84f2bdfa8</code>)</div>
+  <p>The PR as opened is unreviewable/unmergeable in its current form &mdash; GitHub itself refuses
+  to render the diff (HTTP 406, too many files). Needs a rebase onto current <code>main</code>
+  before this can be reviewed on GitHub or merged.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">Should fix</span>Hand-maintained schema list can drift from production AutoMigrate list</h3>
+  <div class="loc"><code>test/integration/util/schema.go:20-64</code> (<code>allModels</code> slice)</div>
+  <pre>allModels := []any{
+    // Models normally managed by AutoMigrate in UpdateSchema
+    &amp;models.ReleaseDefinition{},
+    ...
+    // Models normally managed by migrations (partitioned tables).
+    // Created here as regular tables for integration testing.
+    &amp;models.ProwJobRunTest{},
+    ...
+}</pre>
+  <p>This list duplicates the set of models normally passed to <code>AutoMigrate</code> during real
+  schema setup. If a new model is added to production migration logic later but not mirrored here,
+  integration tests keep passing against a schema that no longer matches prod, silently losing
+  coverage value.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-question">Question</span>CI wiring for <code>make integration</code> not visible in this diff</h3>
+  <div class="loc">n/a &mdash; no CI job config changes in scope</div>
+  <p><code>make integration</code> requires Docker/Podman-in-container capability. Confirm the Prow
+  job environment for this repo supports that before removing WIP status; otherwise this target
+  will only ever run locally.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-nit">Nit</span><code>replaceDBName</code> hand-rolls DSN string splicing</h3>
+  <div class="loc"><code>test/integration/util/testdb.go</code> (<code>replaceDBName</code>)</div>
+  <p>Manual byte-scanning to replace the DB name segment of a DSN works for the
+  testcontainers-produced format tested here, but is more fragile than parsing with
+  <code>net/url</code> and replacing <code>.Path</code>. Low risk since the DSN shape is
+  controlled by testcontainers &mdash; a simplification opportunity, not a blocker.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-nit">Nit</span>Podman socket detection duplicates existing tooling patterns</h3>
+  <div class="loc"><code>test/integration/util/testdb.go</code> (<code>configurePodmanIfNeeded</code>, <code>podmanSocketPath</code>)</div>
+  <p>The repo likely already has Podman-detection logic for e2e/devcontainer tooling under
+  <code>scripts/</code>. Worth checking for reuse instead of re-implementing socket discovery in
+  Go, though not required for correctness.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>previous_fails</code> rename is consistent across <code>functions.go</code>,
+  <code>build_clusters.go</code>, <code>job_queries.go</code>, and matches existing Go struct tags
+  (<code>pkg/db/models/build_clusters.go</code>, <code>pkg/apis/api/types.go</code>). No other code
+  references the old column names for these two query paths.</li>
+  <li><code>PostgresFunctions</code> are recreated via hash-based <code>syncSchema</code>
+  (<code>pkg/db/db.go:405</code>) &mdash; the function-body fix self-applies at next server
+  startup, no migration needed.</li>
+  <li>Half-open interval fix (<span class="hl">&gt;= $1 AND &lt; $2</span> for previous period)
+  correctly stops double-counting boundary rows without changing current-period
+  (still <code>BETWEEN</code>) semantics.</li>
+  <li><code>TestVariantReports</code> and <code>TestJobReports</code> place runs exactly at
+  <code>start</code>, <code>boundary</code>, and <code>end</code> timestamps, directly exercising
+  the boundary-double-count bug being fixed.</li>
+  <li><code>TestJobReports</code> explicitly asserts <code>report.PreviousFails</code>, exercising
+  the exact failures/fails column-name bug fixed here.</li>
+  <li><code>sanitize()</code> in <code>testdb.go</code> restricts generated DB names to
+  <code>[a-z0-9_]</code> before they're interpolated via <code>fmt.Sprintf</code> into
+  <code>CREATE DATABASE</code> &mdash; safe given only <code>t.Name()</code> feeds it, but the
+  interpolation is only safe because of this step.</li>
+  <li><code>gofmt -l</code> clean on all changed Go files.</li>
+  <li><code>go.mod</code>/<code>go.sum</code> additions are scoped to <code>testcontainers-go</code>
+  + transitive deps (Docker/Moby client libs, <code>gopsutil</code>, etc.) plus incidental indirect
+  bumps (<code>logrus</code>, <code>mergo</code>, <code>klauspost/compress</code>,
+  <code>golang.org/x/*</code>); nothing suspicious.</li>
+  <li>Docs updated in the same PR per project convention (<code>.apm/instructions/</code>, mirrored
+  <code>.claude/rules/</code>, <code>.cursor/rules/</code>, regenerated <code>AGENTS.md</code>/<code>CLAUDE.md</code>).</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Can you rebase this onto current <code>main</code> so the PR diff reflects only the intended ~760-line change?</li>
+  <li>Does the Prow CI config for this repo support Docker/Podman-in-container so <code>make integration</code> can actually run there, or is this local-only for now?</li>
+  <li>Is there a plan to keep <code>test/integration/util/schema.go</code>'s model list in sync with production <code>AutoMigrate</code> calls (e.g. a comment pointing at the source of truth, or a test that diffs the two lists)?</li>
+</ul>
+
+</body>
+</html>
