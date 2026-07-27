@@ -37,14 +37,15 @@
 <header>
   <h1>Review: openshift/sippy#3825</h1>
   <dl>
-    <dt>Title</dt><dd>[WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness</dd>
+    <dt>Title</dt><dd>TRT-2741: Add per-request BQ/PG toggle for Component Readiness</dd>
     <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3825">github.com/openshift/sippy/pull/3825</a></dd>
     <dt>Base</dt><dd><code>main</code></dd>
     <dt>Head SHA</dt><dd><code>0faeda5b03b42da0a1c927706b4560d2bf471005</code></dd>
-    <dt>Reviewed at</dt><dd><code>2026-07-26T12:30:44Z</code></dd>
+    <dt>Reviewed at</dt><dd><code>2026-07-27T11:35:41Z</code></dd>
   </dl>
   <p style="font-size:0.88em;color:#666;margin-top:0.75em;"><strong>Refresh log:</strong> <code>b8c7a98b0</code>&rarr;<code>0faeda5b0</code> &mdash; force-pushed, small targeted diff (3 files, +78/-48) confined to <code>postgres/provider.go</code> and its tests: <code>filterByDBGroupBy</code> now takes <code>sets.Set[string]</code> instead of a hand-rolled <code>map[string]bool</code>, and <code>variants_test.go</code> assertions were tightened to check actual values instead of only counts. No findings resolved, none new. No PR comments/reviews since prior review.</p>
   <p style="font-size:0.88em;color:#666;margin-top:0.4em;"><strong>Refresh log:</strong> <code>0faeda5b0</code>&rarr;<code>0faeda5b0</code> (no code change) &mdash; mstaeble left an inline reply on <code>docs/database-tuning.md</code> (2026-07-26T12:07:18Z) defending the <code>random_page_cost</code> rationale text against a CodeRabbit nit; CodeRabbit's analysis chain agreed no doc change was needed and withdrew the comment, then submitted an APPROVED review (2026-07-26T12:07:52Z). Unrelated to any existing finding.</p>
+  <p style="font-size:0.88em;color:#666;margin-top:0.4em;"><strong>Refresh log:</strong> <code>0faeda5b0</code>&rarr;<code>0faeda5b0</code> (no code change) &mdash; title dropped the <code>[WIP]</code> prefix; <code>do-not-merge/work-in-progress</code> label removed, <code>ready-for-human-review</code> added. mstaeble triggered <code>/test e2e</code> (2026-07-26T13:59:04Z); openshift-ci reported all tests passed (2026-07-26T14:23:06Z). No new review comments or reviews. PR is now ready for human review; open findings/questions remain unaddressed.</p>
 </header>
 
 <h2>Verdict</h2>

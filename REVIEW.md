@@ -1,9 +1,9 @@
 ---
 pr: openshift/sippy#3825
-title: "[WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness"
+title: "TRT-2741: Add per-request BQ/PG toggle for Component Readiness"
 head_sha: 0faeda5b03b42da0a1c927706b4560d2bf471005
 base: main
-reviewed_at: 2026-07-26T12:30:44Z
+reviewed_at: 2026-07-27T11:35:41Z
 verdict: needs-discussion
 refresh_log:
   - from: b8c7a98b07742f749fed68188a3ed7bd99d13c8f
@@ -12,6 +12,9 @@ refresh_log:
   - from: 0faeda5b03b42da0a1c927706b4560d2bf471005
     to: 0faeda5b03b42da0a1c927706b4560d2bf471005
     summary: No code change. mstaeble left an inline reply on docs/database-tuning.md (2026-07-26T12:07:18Z) defending the random_page_cost rationale text against a CodeRabbit nit; CodeRabbit's analysis chain agreed no doc change was needed and withdrew the comment, then submitted an APPROVED review (2026-07-26T12:07:52Z). Unrelated to any existing finding.
+  - from: 0faeda5b03b42da0a1c927706b4560d2bf471005
+    to: 0faeda5b03b42da0a1c927706b4560d2bf471005
+    summary: No code change. Title dropped "[WIP]" prefix; do-not-merge/work-in-progress label removed and ready-for-human-review label added. mstaeble triggered /test e2e (2026-07-26T13:59:04Z), openshift-ci reported all tests passed (2026-07-26T14:23:06Z). No new review comments or reviews. PR is now ready for human review; none of the open findings/questions have been addressed.
 ---
 
 ## Summary
