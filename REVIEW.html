@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3825</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; background: #fff; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  code { background: #f2f2f2; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+  pre { background: #f6f8fa; padding: 0.9em 1em; border-radius: 6px; overflow-x: auto; font-size: 0.88em; border: 1px solid #e1e4e8; }
+  header { border-bottom: 2px solid #ddd; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25em 1em; margin: 0.5em 0; }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.2rem; border-bottom: 1px solid #eee; padding-bottom: 0.3em; margin-top: 2rem; }
+  h3 { font-size: 1.02rem; margin-bottom: 0.3em; }
+  .verdict { padding: 0.9em 1.1em; border-radius: 6px; font-weight: 600; margin-bottom: 0.5em; }
+  .verdict.needs-discussion { background: #fff8e1; border: 1px solid #f0c419; color: #7a5c00; }
+  .finding { border: 1px solid #e1e4e8; border-radius: 6px; padding: 0.9em 1.1em; margin-bottom: 1em; }
+  .finding.blocking { border-left: 5px solid #d73a49; }
+  .finding.should-fix { border-left: 5px solid #e0a800; }
+  .finding.nit { border-left: 5px solid #6a737d; }
+  .finding.question { border-left: 5px solid #0366d6; }
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15em 0.55em; border-radius: 3px; margin-right: 0.5em; vertical-align: middle; }
+  .badge.blocking { background: #d73a49; color: #fff; }
+  .badge.should-fix { background: #e0a800; color: #fff; }
+  .badge.nit { background: #6a737d; color: #fff; }
+  .badge.question { background: #0366d6; color: #fff; }
+  .loc { font-size: 0.85em; color: #666; margin-bottom: 0.4em; }
+  ul { padding-left: 1.4em; }
+  a { color: #0366d6; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3825</h1>
+  <dl>
+    <dt>Title</dt><dd>[WIP] TRT-2741: Add per-request BQ/PG toggle for Component Readiness</dd>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3825">github.com/openshift/sippy/pull/3825</a></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Head SHA</dt><dd><code>0faeda5b03b42da0a1c927706b4560d2bf471005</code></dd>
+    <dt>Reviewed at</dt><dd><code>2026-07-26T12:30:44Z</code></dd>
+  </dl>
+  <p style="font-size:0.88em;color:#666;margin-top:0.75em;"><strong>Refresh log:</strong> <code>b8c7a98b0</code>&rarr;<code>0faeda5b0</code> &mdash; force-pushed, small targeted diff (3 files, +78/-48) confined to <code>postgres/provider.go</code> and its tests: <code>filterByDBGroupBy</code> now takes <code>sets.Set[string]</code> instead of a hand-rolled <code>map[string]bool</code>, and <code>variants_test.go</code> assertions were tightened to check actual values instead of only counts. No findings resolved, none new. No PR comments/reviews since prior review.</p>
+  <p style="font-size:0.88em;color:#666;margin-top:0.4em;"><strong>Refresh log:</strong> <code>0faeda5b0</code>&rarr;<code>0faeda5b0</code> (no code change) &mdash; mstaeble left an inline reply on <code>docs/database-tuning.md</code> (2026-07-26T12:07:18Z) defending the <code>random_page_cost</code> rationale text against a CodeRabbit nit; CodeRabbit's analysis chain agreed no doc change was needed and withdrew the comment, then submitted an APPROVED review (2026-07-26T12:07:52Z). Unrelated to any existing finding.</p>
+</header>
+
+<h2>Verdict</h2>
+<div class="verdict needs-discussion">NEEDS DISCUSSION</div>
+<p>No correctness or safety bugs found that would block merge outright, but the PR (still labeled WIP) is missing test coverage on the two riskiest new mechanisms &mdash; the BQ/PG dispatch and the variant key encoding &mdash; plus a documentation update for a user-facing default change. Worth resolving before it comes off WIP.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>dataSource</code> query param and cookie-based UI toggle to route Component Readiness requests to BigQuery or PostgreSQL per request.</li>
+  <li>Rewrites the PG test-status query as a prefix-sum over <code>test_cumulative_summaries</code>, with SQL-level variant grouping via VALUES-clause joins, replacing per-row Go-side filtering.</li>
+  <li>Adds GA base-window routing (1/30/90 day) to a pre-computed <code>prow_ga_raw_test_data</code> table, and fixes a planner regression in test_details via a MATERIALIZED CTE.</li>
+  <li>Migrates <code>TestStatus.Variants</code> from <code>[]string</code> to <code>map[string]string</code>, adds a deterministic null-byte-separated <code>Encode()</code>/<code>DecodeColumnID()</code> key scheme, and indexes <code>FindOpenRegression</code> by testID for O(1) lookup.</li>
+  <li>Merges <code>CompareVariants</code> into <code>IncludeVariants</code> for PG cross-compare parity, and bumps the UI's default base window from 27 to 30 days.</li>
+</ul>
+<p>The PR description documents several accepted BQ/PG parity gaps (lastFailure scoping, InfraFailure inclusion, lifecycle filter, job scope) &mdash; those are not re-flagged here.</p>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><strong>EncodeVariants not provably collision-free</strong>
+  <div class="loc"><code>pkg/apis/api/componentreport/crtest/types.go:116-133</code></div>
+  <pre>pairs = append(pairs, key+":"+value)
+...
+strings.Join(pairs, "\x00")</pre>
+  <p>Keys/values aren't escaped for <code>:</code> or embedded <code>\x00</code>. Two distinct variant maps can encode identically (e.g. <code>{"A":"B:C"}</code> vs <code>{"A:B":"C"}</code>), and a value containing a literal null byte would corrupt <code>DecodeColumnID</code>'s split. Low likelihood given the fixed variant vocabulary, but unenforced and untested.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><strong>Base window default change (27&rarr;30 days) undocumented</strong>
+  <div class="loc"><code>sippy-ng/src/component_readiness/CompReadyVars.jsx</code>, <code>ReleaseSelector.jsx</code></div>
+  <p>Applied consistently in both files, but this is a user-facing default behavior change and isn't mentioned in README.md or sippy-ng/README.md, contrary to project convention for documenting config/behavior changes in the same PR.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><strong><code>mixed</code> provider dispatch has no test coverage</strong>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/mixed/provider.go</code></div>
+  <p><code>providerFor</code>'s BQ/PG routing is the core mechanism this PR introduces, yet there's no test file for the <code>mixed</code> package. <code>queryparamparser_test.go</code> also lacks a case for parsing <code>dataSource</code>.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><strong>No test pinning <code>DataSource</code> in fallback cache key</strong>
+  <div class="loc"><code>pkg/api/componentreadiness/middleware/releasefallback/releasefallback.go:337,352</code></div>
+  <p><code>fallbackTestQueryReleasesGeneratorCacheKey</code> appears to include <code>DataSource</code>, but nothing verifies this in a test. If it were ever dropped, BQ and PG requests could collide in cache and silently serve the wrong source's data.</p>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><strong>Shared mutable variant map aliased across TestStatus rows</strong>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:416-436</code></div>
+  <p><code>scanRows</code> sets <code>ts.Variants = variantMap</code>, reusing the same map instance for every row in a variant group. No current mutation path found, but it's a latent hazard if any future code mutates <code>TestStatus.Variants</code> in place. Consider <code>maps.Clone</code> or a comment documenting the shared-ownership invariant.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><strong>GA window boundary logic untested directly</strong>
+  <div class="loc"><code>postgres/cr_queries.go:203</code>, <code>postgres/provider.go:230-257</code></div>
+  <p><code>baseMatchesGAWindow</code> (1/30/90-day detection) and its re-derivation of <code>windowDays</code> in <code>queryBaseTestStatusGA</code> are algebraically consistent but only exercised transitively &mdash; no direct unit test for boundary conditions.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><strong>Encode/Decode roundtrip tests only cover alphanumeric values</strong>
+  <div class="loc"><code>pkg/apis/api/componentreport/crtest/types_test.go</code></div>
+  <p>No test covers colon- or null-byte-containing values &mdash; exactly the scenario the encoding's collision-freedom depends on.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><strong>Invalid dataSource silently falls back to BigQuery</strong>
+  <div class="loc"><code>pkg/util/param/param.go:67</code>, <code>utils/queryparamparser.go:93-95</code></div>
+  <p>Invalid values are logged and reset to <code>""</code> rather than surfacing a 400, inconsistent with how other params reject invalid input. Low impact since the regex allowlist already blocks garbage before it's user-visible.</p>
+</div>
+
+<h3>Questions</h3>
+
+<div class="finding question">
+  <span class="badge question">question</span><strong>Unrelated GA/cumulative-summary infra bundled into this PR</strong>
+  <div class="loc"><code>pkg/db/models/prow.go</code>, <code>pkg/db/query/feature_gates.go</code>, <code>pkg/dataloader/gateststatus/loader.go</code></div>
+  <p>These support the GA-window/cumulative-summary feature rather than the dataSource toggle itself. No correctness issues found, but worth asking whether a split would ease review given the PR's size (44 files) and WIP status.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL construction: all user-controlled variant keys/values go through <code>?</code> placeholders; only integers are <code>fmt.Sprintf</code>'d into VALUES clauses &mdash; no injection risk.</li>
+  <li>Prefix-sum date-range math (<code>AddDays(-1)</code> half-open interval convention) traced correctly across sample/GA/placeholder query call sites.</li>
+  <li><code>FindOpenRegression</code> testID indexing: correct (it's a pre-filter, not the full match), no collision risk, well tested.</li>
+  <li>Cookie-based dataSource UI toggle: written only from hardcoded constants, validated server-side by regex, safe default on missing/corrupt cookie.</li>
+  <li>Provider interface parity (BigQuery/Postgres/Mixed): verified via build and interface assertions.</li>
+  <li>HATEOAS: <code>dataSource</code> correctly propagated into generated links, covered by tests.</li>
+  <li><code>TestStatus.Variants</code> type change: safe, that struct is internal-only and never crosses the API/cache boundary directly.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the <code>EncodeVariants</code> collision scenario (colon/null-byte in variant values) actually reachable given the real variant vocabulary, or should it be defensively escaped anyway?</li>
+  <li>Should the 27&rarr;30 day base window default change get a README/config doc note before merge?</li>
+  <li>Any plan to add <code>mixed</code> package tests and a <code>dataSource</code> cache-key regression test before this leaves WIP?</li>
+  <li>Would splitting the GA-window/cumulative-summary DB-layer changes into a separate PR from the dataSource toggle make review easier?</li>
+</ul>
+
+</body>
+</html>
