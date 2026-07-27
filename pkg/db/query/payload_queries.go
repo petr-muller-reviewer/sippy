@@ -47,6 +47,45 @@ func GetLastAcceptedByArchitectureAndStream(db *gorm.DB, release string, reportE
 	return results, nil
 }
 
+// GetTestFailuresForPayloadStream returns a GORM subquery with one row per
+// test, carrying parallel arrays of release tags, job names, and job run URLs.
+// The caller iterates these arrays to build the per-payload failure map in Go.
+//
+// The prow_job_run_tests table is partitioned by (prow_job_run_release,
+// prow_job_run_timestamp). Both partition keys receive literal parameter values
+// to ensure partition pruning.
+func GetTestFailuresForPayloadStream(db *gorm.DB, release, stream, arch string, reportEnd time.Time, excludeTestName string) *gorm.DB {
+	fourteenDaysAgo := reportEnd.Add(-14 * 24 * time.Hour)
+	return db.Raw(`
+SELECT pjrt.test_id, t.name,
+       COUNT(*)::int AS failure_count,
+       array_agg(rt.release_tag ORDER BY pj.name, pjr.id) AS release_tags,
+       array_agg(pj.name ORDER BY pj.name, pjr.id) AS job_names,
+       array_agg(pjr.url ORDER BY pj.name, pjr.id) AS job_run_urls
+FROM release_tags rt
+JOIN release_job_runs rjr ON rjr.release_tag_id = rt.id
+JOIN prow_job_runs pjr ON pjr.id = rjr.prow_job_run_id
+JOIN prow_job_run_tests pjrt ON pjrt.prow_job_run_id = pjr.id
+                            AND pjrt.prow_job_run_timestamp = pjr.timestamp
+JOIN tests t ON t.id = pjrt.test_id
+JOIN prow_jobs pj ON pj.id = pjr.prow_job_id
+WHERE rt.release = ?
+  AND rt.architecture = ?
+  AND rt.stream = ?
+  AND rt.release_time >= ?
+  AND pjrt.prow_job_run_release = ?
+  AND pjrt.prow_job_run_timestamp >= ?
+  AND pjr.timestamp >= ?
+  AND rjr.kind = 'Blocking'
+  AND rjr.state = 'Failed'
+  AND pjrt.status = 12
+  AND t.name != ?
+GROUP BY pjrt.test_id, t.name`,
+		release, arch, stream, fourteenDaysAgo,
+		release, fourteenDaysAgo, fourteenDaysAgo,
+		excludeTestName)
+}
+
 func GetTestFailuresForPayload(db *gorm.DB, payloadTag, release string, releaseTime time.Time) ([]models.PayloadFailedTest, error) {
 	results := make([]models.PayloadFailedTest, 0)
 	result := db.Raw(`SELECT DISTINCT
