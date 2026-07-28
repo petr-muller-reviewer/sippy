@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3798</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fbfbfa;
+    margin: 0;
+    padding: 2rem 1rem;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header {
+    border: 1px solid #ddd;
+    background: #fff;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  header h1 { margin: 0 0 0.5rem 0; font-size: 1.3rem; }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    font-size: 0.9rem;
+    margin: 0.5rem 0 0 0;
+  }
+  header dt { color: #666; }
+  header dd { margin: 0; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  header a { color: #0969da; text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+
+  h2 { font-size: 1.15rem; border-bottom: 2px solid #eee; padding-bottom: 0.3rem; margin-top: 2.2rem; }
+
+  .verdict {
+    display: inline-block;
+    font-weight: 600;
+    padding: 0.3rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.95rem;
+  }
+  .verdict.approve { background: #dafbe1; color: #116329; }
+  .verdict.request-changes { background: #ffebe9; color: #a40e26; }
+  .verdict.needs-discussion { background: #fff8c5; color: #7d5c00; }
+
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+    background: #fff;
+  }
+  .finding.blocking { border-left-color: #cf222e; }
+  .finding.should-fix { border-left-color: #bf8700; }
+  .finding.nit { border-left-color: #57606a; }
+  .finding.question { border-left-color: #0969da; }
+
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1.02rem; }
+  .badge {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #ffebe9; color: #a40e26; }
+  .badge.should-fix { background: #fff8c5; color: #7d5c00; }
+  .badge.nit { background: #eaeef2; color: #444d56; }
+  .badge.question { background: #ddf4ff; color: #0969da; }
+
+  .loc {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 0.85rem;
+    color: #555;
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #e6e6e6;
+    border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  code { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>openshift/sippy#3798</h1>
+  <div>TRT-2811: Make prow loader batch writes resilient to single-batch failures</div>
+  <dl>
+    <dt>Base</dt><dd>main</dd>
+    <dt>Head SHA</dt><dd>d31a9aca5b9efb612aa44f804f8ca53c345a8cc4</dd>
+    <dt>Reviewed at</dt><dd>2026-07-27T11:34:05Z</dd>
+    <dt>Previous review</dt><dd>a101186b1 &rarr; d31a9aca5, 2026-07-26T12:52:26Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3798">github.com/openshift/sippy/pull/3798</a></dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict approve">Approve</span></p>
+<p>No blocking issues. Since the previous review, the author extracted a <code>batchWriterFunc</code> seam and added <code>accumulate_test.go</code> covering the batching/counting/error-collection logic. CodeRabbit independently raised the same two findings as the prior review; the test-coverage one is now resolved, and the ctx-cancellation-flush one was withdrawn after the author confirmed the behavior is intentional (avoids silently dropping accounted-for results). Only a cosmetic naming nit remains open. WIP label dropped, PR self-approved, CI green.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Changes <code>accumulateAndWriteJobRuns</code> in <code>pkg/dataloader/prowloader/prow.go</code> so a failed batch write is logged and accumulation continues with the next batch, instead of returning an error that aborts the whole load.</li>
+  <li>Each failed batch's error is appended individually to <code>pl.errors</code> (previously one wrapped error for the entire call), so <code>LoaderWithMetrics</code>'s Prometheus error histogram gets a per-batch count.</li>
+  <li>Adds a <code>ctx.Err()</code> check inside the accumulation loop to stop processing early if the loader's overall context is canceled.</li>
+  <li>Drops the explicit <code>cancelFetch()</code> call that used to run on write failure — fetch and the later BigQuery-backed <code>loadDailyTestAnalysisByJob</code> step don't depend on Postgres writes succeeding.</li>
+  <li>Adds a summary log line reporting succeeded/failed batch counts at the end of the run.</li>
+</ul>
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>Added <code>type batchWriterFunc func(ctx context.Context, batch []jobRunResult) error</code> and a <code>batchWriter</code> field on <code>ProwLoader</code>, wired to <code>pl.writeJobRunBatch</code> in <code>New()</code>, so tests can inject a stub without a real DB connection.</li>
+  <li>Added <code>pkg/dataloader/prowloader/accumulate_test.go</code> (221 lines): table-driven cases for all-succeed, first/trailing/all-batch failure, plus dedicated tests for per-batch <code>pl.errors</code> entries and cancellation-with-pending-batch accounting.</li>
+  <li>Dropped <code>[WIP]</code> from the title; PR is self-approved with CI green.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Nit</span>Closure parameter name doesn't convey it's failure-only</h3>
+  <span class="loc">pkg/dataloader/prowloader/prow.go:1214-1223</span>
+  <p><code>msg</code> in <code>flush(msg string)</code> is only used inside the failure branch. Renaming to <code>failureMsg</code> would make that clear without reading the closure body. Still unaddressed as of <code>d31a9ac</code>.</p>
+  <pre><code>flush := func(msg string) {
+    if err := pl.batchWriter(ctx, batch); err != nil {
+        log.WithError(err).WithField("batchSize", len(batch)).Warning(msg)</code></pre>
+</div>
+
+<h2>Resolved since previous review</h2>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Resolved</span>Final flush still runs after breaking on ctx cancellation</h3>
+  <span class="loc">pkg/dataloader/prowloader/prow.go:1225-1236</span>
+  <p>Confirmed intentional by the author in a PR review comment (2026-07-26T14:03:10Z): skipping the flush on cancellation would silently drop the already-accumulated batch from both <code>total</code> and <code>failed</code> accounting. Attempting the write anyway means a canceled-context failure is recorded as a failed batch with an error in <code>pl.errors</code> &mdash; matching the "no silent data loss" design goal. CodeRabbit raised the identical concern independently and withdrew it after the same explanation. <code>TestAccumulateAndWriteJobRuns_CancelledContextDoesNotSilentlyDrop</code> now codifies this behavior.</p>
+</div>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Resolved</span>No test coverage for the new partial-failure/counting logic</h3>
+  <span class="loc">pkg/dataloader/prowloader/prow.go:1206-1247</span>
+  <p>Addressed in commit <code>d31a9aca5</code> via the <code>batchWriterFunc</code> seam described above &mdash; exactly the function-type-field pattern suggested (matching <code>regressiontracker.go</code>'s <code>failureCounterFunc</code>).</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>fmt</code> and <code>github.com/pkg/errors</code> imports remain used elsewhere in the file after switching per-batch errors to <code>fmt.Errorf</code> &mdash; no import churn needed.</li>
+  <li>The <code>results</code> channel is buffered to <code>len(entries)</code> (line 274), so fetch-worker sends can never block even if the consumer loop exits early on cancellation &mdash; no goroutine leak from the new early-break path.</li>
+  <li><code>fetchCtx</code> is derived from <code>pl.ctx</code> via <code>context.WithCancel</code>, so removing the explicit <code>cancelFetch()</code> call on write failure is safe: cancellation of <code>pl.ctx</code> still propagates to <code>fetchCtx</code> and stops fetch workers through their own <code>ctx.Err()</code> checks.</li>
+  <li>Confirmed in <code>loaderwithmetrics.go:86</code> that <code>errorMetric.Observe(len(loader.Errors()))</code> does produce more granular Prometheus counts from per-batch error entries, matching the PR description's claim.</li>
+  <li><code>prowLoaderProcessedMetricGauge</code> semantics unchanged &mdash; still counts only successfully-written runs, consistent with prior behavior.</li>
+  <li>No cross-provider (BigQuery/Postgres) parity concern &mdash; this only touches the Postgres write path.</li>
+  <li>The new <code>batchWriter</code> indirection is wired correctly: <code>New()</code> sets <code>pl.batchWriter = pl.writeJobRunBatch</code>, so production behavior is unchanged; only test construction bypasses <code>New()</code> to inject a stub.</li>
+  <li><code>accumulate_test.go</code> cases are table-driven with descriptive names, matching project convention.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>None outstanding &mdash; WIP label dropped, PR self-approved with CI green, both open items from the prior review resolved.</li>
+</ul>
+
+</div>
+</body>
+</html>
