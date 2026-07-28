@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: openshift/sippy#3839</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    max-width: 820px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    background: #fff;
+  }
+  h1 { font-size: 1.5rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1em 1.2em; margin-bottom: 1.5rem; }
+  .meta dt { font-weight: 600; display: inline; }
+  .meta dt::after { content: ": "; }
+  .meta dd { display: inline; margin: 0; }
+  .meta dd::after { content: ""; display: block; }
+  .verdict { background: #dafbe1; border: 1px solid #aceebb; border-radius: 6px; padding: 0.8em 1.2em; margin-bottom: 1.5rem; }
+  .verdict strong { color: #116329; }
+  .severity { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.15em 0.5em; border-radius: 3px; text-transform: uppercase; margin-right: 0.4em; vertical-align: middle; }
+  .sev-nit { background: #ddf4ff; color: #0550ae; }
+  .sev-question { background: #fff8c5; color: #6a5d1a; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: 0.3em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Review: Extend partition start bound to cover outlier job start times</h1>
+
+<div class="meta">
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3839">openshift/sippy#3839</a></dd>
+    <dt>Head SHA</dt><dd><code>b184f2daeae0a017851c36b111d2217ec2f8e87d</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed</dt><dd>2026-07-28T11:52:28Z</dd>
+  </dl>
+</div>
+
+<div class="verdict">
+  <strong>Approve</strong> &mdash; Solid, well-targeted fix. The approach of adapting the partition window to actual data instead of guessing a larger grace period is the right design. Code is clean, well-tested, and follows project conventions. Two nits on comment accuracy, one observability question.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>partitionStartDate()</code> function that scans all fetched <code>prowJobs</code> and finds the earliest non-zero <code>StartTime</code>, extending the partition window back to cover it.</li>
+  <li>Changes <code>ensurePartitions()</code> to accept the <code>prowJobs</code> slice and delegate start-date computation to the new function.</li>
+  <li>Consolidates the 1-day grace period (previously applied at the <code>EnsurePartitions</code> call-site) into <code>partitionStartDate</code>.</li>
+  <li>Adds <code>TestPartitionStartDate</code> with four table-driven cases covering no-jobs, within-grace, zero-value times, and outlier extension.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity sev-nit">nit</span> Doc comment says "floor" but means "default/ceiling"</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:185</code></p>
+<pre><code>// partitionStartDate computes the start of the date range for which partitions must
+// exist to accommodate the given prowJobs. loadSince is used as a floor, with a 1 day
+// grace period</code></pre>
+<p>"loadSince is used as a floor" is misleading. The function uses <code>loadSince - 1day</code> as the <em>default</em> start date and only moves it <em>earlier</em> (toward smaller values). <code>loadSince</code> acts as the upper bound on the default, not a lower bound. Suggest: "loadSince (minus a 1-day grace) is the default start date, extended earlier if any job's StartTime precedes it."</p>
+
+<h3><span class="severity sev-nit">nit</span> ensurePartitions doc says "one week" but default is 14 days</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:205</code></p>
+<pre><code>//   - pl.loadSince if available, otherwise looks back one week, plus a 1 day grace period</code></pre>
+<p>The comment says "otherwise looks back one week" but <code>resolveLoadSince()</code> falls back to <code>DefaultLookbackDays = 14</code>. This is inaccurate inherited text, worth correcting while touching these comments.</p>
+
+<h3><span class="severity sev-question">question</span> Log when partition bound is extended beyond default grace</h3>
+<p><code>pkg/dataloader/prowloader/prow.go:193-201</code></p>
+<p>When <code>partitionStartDate</code> returns a date earlier than <code>loadSince - 1day</code>, it would help operators to see a log line noting the extension (e.g. the delta or the earliest outlier time). Currently the only visibility is the existing log at line 214 which shows the final range but not whether it was extended beyond the default.</p>
+
+<h2>Things I checked and found fine</h2>
+<ul>
+  <li><code>partitionStartDate</code> correctly skips zero-value <code>time.Time</code> via <code>!st.IsZero()</code></li>
+  <li>Range-over-index (<code>for i := range</code>) avoids copying <code>ProwJob</code> structs</li>
+  <li>Non-BQ path (Prow JSON fetch) is also covered: <code>ensurePartitions</code> receives the full <code>prowJobs</code> slice regardless of source</li>
+  <li>Tests cover no-jobs, within-grace, zero-value, and outlier cases</li>
+  <li>The 1-day grace period logic was moved from the <code>EnsurePartitions</code> call-site into <code>partitionStartDate</code>, consolidating it correctly (no double-subtraction)</li>
+  <li>O(n) scan over <code>prowJobs</code> is negligible compared to BQ query and DB operations</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Would it be worth logging a warning when the partition bound is extended beyond the default grace period, to give operators visibility into outlier jobs?</li>
+</ul>
+
+</body>
+</html>
