@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3826</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SF Mono", Consolas, Monaco, "Courier New", monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.2rem;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 0.3rem;
+    margin-top: 2rem;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.03em;
+  }
+  .verdict.approve { background: #d4edda; color: #155724; }
+  .verdict.request-changes { background: #f8d7da; color: #721c24; }
+  .verdict.needs-discussion { background: #fff3cd; color: #856404; }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.5rem 1rem;
+    margin-bottom: 1.25rem;
+    background: #fafafa;
+  }
+  .finding.blocking { border-color: #c0392b; }
+  .finding.should-fix { border-color: #d68910; }
+  .finding.nit { border-color: #7f8c8d; }
+  .finding.question { border-color: #2980b9; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1.05rem; }
+  .tag {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .tag.blocking { background: #c0392b; }
+  .tag.should-fix { background: #d68910; }
+  .tag.nit { background: #7f8c8d; }
+  .tag.question { background: #2980b9; }
+  .loc { color: #555; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3826</h1>
+  <dl>
+    <dt>Title</dt><dd>TRT-2737: Remove test_analysis_by_job_by_dates table and BQ loader</dd>
+    <dt>Head SHA</dt><dd><code class="inline">d9996493ae47cfa02d77f7f7a348a3b3ec0873e1</code></dd>
+    <dt>Base</dt><dd><code class="inline">main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-26T11:25:35Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3826">github.com/openshift/sippy/pull/3826</a></dd>
+    <dt>Refresh log</dt><dd>2026-07-26T11:25:35Z &mdash; no code change; WIP label/title removed and ready-for-human-review added (hold label persists); CI e2e passed; CodeRabbit raised and withdrew two findings after author explanation.</dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict approve">Approve</span></p>
+<p>The removal is clean and complete &mdash; every reference to the dropped table, model, loader, and helper functions was found and removed, the down-migration faithfully restores the original schema, and the baseline-detection fallback was correctly repointed to a table that will survive this change. The only open items are process/ops questions (WIP/hold labels, a stale planning doc, and prod migration lock duration), not code defects.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Removes the <code class="inline">test_analysis_by_job_by_dates</code> GORM model, its BigQuery loader (<code class="inline">loadDailyTestAnalysisByJob</code>) and supporting types/functions, and the <code class="inline">ProwLoaderTestAnalysis</code> BQ label.</li>
+  <li>Removes partition registration for the table and its entries in the e2e partition lifecycle test.</li>
+  <li>Adds migration 000008 to drop the dependent view <code class="inline">prow_test_analysis_by_variant_14d_view</code>, the table itself, and any detached partitions left behind by the partition lifecycle.</li>
+  <li>Removes now-dead helpers <code class="inline">LoadProwJobCache</code> and <code class="inline">LoadTestCache</code> (only callers were in the removed loader).</li>
+  <li>Repoints the baseline-migration existence check from the removed table to <code class="inline">prow_job_run_tests</code>, and rewrites a stale comment about <code class="inline">plan_cache_mode=force_custom_plan</code>.</li>
+</ul>
+<p><strong>Since previous review:</strong> no code changes (head SHA unchanged). Author removed the <code class="inline">[WIP]</code> title prefix and the <code class="inline">do-not-merge/work-in-progress</code> label; PR gained <code class="inline">ready-for-human-review</code> (<code class="inline">do-not-merge/hold</code> still present). CI ran <code class="inline">/test e2e</code> and all tests passed. CodeRabbit reviewed and raised two findings, both withdrawn after the author's explanation.</p>
+
+<h2>Findings</h2>
+
+<div class="finding question">
+  <h3><span class="tag question">Question</span>Historical plan doc left unupdated</h3>
+  <p class="loc"><code class="inline">docs/plans/trt-1989-phase4-partitioned-tables.md</code></p>
+  <p>Still extensively references <code class="inline">test_analysis_by_job_by_dates</code> / <code class="inline">TestAnalysisByJobByDate</code>. Likely fine as a point-in-time planning record, but worth confirming whether <code class="inline">docs/plans/</code> docs are expected to be updated or archived once their work completes.</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="tag question">Question</span>Migration lock duration on large prod table</h3>
+  <p class="loc"><code class="inline">pkg/db/migrations/000008_drop_test_analysis_by_job_by_dates.up.sql</code></p>
+  <p>The old <code class="inline">plan_cache_mode</code> comment (now rewritten) mentioned 10k+ partitions on this table causing 17+ minute planner enumeration. Dropping the parent table and that many partitions in one migration transaction could hold locks for a while in prod. <code class="inline">make e2e</code> passing doesn't necessarily exercise prod-scale partition counts &mdash; worth confirming rollout/lock expectations are acceptable.</p>
+</div>
+
+<h2>Resolved</h2>
+
+<div class="finding question">
+  <h3><span class="tag question">Resolved</span>PR still marked WIP / on hold despite <code class="inline">approved</code> label</h3>
+  <p class="loc">PR labels</p>
+  <p>Author removed the <code class="inline">[WIP]</code> title prefix and the <code class="inline">do-not-merge/work-in-progress</code> label; PR gained <code class="inline">ready-for-human-review</code>. <code class="inline">do-not-merge/hold</code> is still present, so merge readiness is now gated only on that.</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="tag question">Resolved</span>Down-migration should restore the dropped view (raised by CodeRabbit)</h3>
+  <p class="loc"><code class="inline">pkg/db/migrations/000008_drop_test_analysis_by_job_by_dates.down.sql</code></p>
+  <p>CodeRabbit initially flagged that the down migration doesn't recreate <code class="inline">prow_test_analysis_by_variant_14d_view</code>. Author explained the view had no canonical definition to restore &mdash; it was dynamically created by application code removed in Phase 1 (#3747), which also removed its registration in <code class="inline">pkg/db/views.go</code> and its only consumer. CodeRabbit verified against #3747 and withdrew the finding, consistent with this review's own "Checked" note that the view isn't tracked in <code class="inline">views.go</code>.</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="tag question">Resolved</span>e2e partition test coverage gap for aggregate tables (raised by CodeRabbit)</h3>
+  <p class="loc"><code class="inline">test/e2e/db/partitions/partitions_test.go</code></p>
+  <p>CodeRabbit noted <code class="inline">test_daily_totals</code> and <code class="inline">test_cumulative_summaries</code> aren't covered by the partition lifecycle e2e test. Author clarified this is a pre-existing gap from #3747 (which added those tables without e2e coverage), not a regression introduced by this removal-only PR. CodeRabbit agreed and withdrew the finding.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>No remaining references to <code class="inline">TestAnalysisByJobByDate</code>, <code class="inline">LoadProwJobCache</code>, <code class="inline">LoadTestCache</code>, or <code class="inline">ProwLoaderTestAnalysis</code> anywhere in the Go codebase (grepped tree-wide).</li>
+  <li><code class="inline">down.sql</code> table/index definitions match the original <code class="inline">000001_create_partitioned_tables.up.sql</code> definitions exactly &mdash; a faithful structural restore (data loss on rollback is expected/documented).</li>
+  <li><code class="inline">prow_test_analysis_by_variant_14d_view</code> isn't tracked in <code class="inline">pkg/db/views.go</code> (<code class="inline">PostgresViews</code>/<code class="inline">PostgresMatViews</code>), so the <code class="inline">DROP VIEW IF EXISTS</code> in the migration is the only place this needed handling.</li>
+  <li>The baseline-detection switch from <code class="inline">test_analysis_by_job_by_dates</code> to <code class="inline">prow_job_run_tests</code> is sound: both originate from the same 000001 baseline migration, and the new marker remains valid after this table is dropped.</li>
+  <li>All imports cleaned up correctly in <code class="inline">prow.go</code> (<code class="inline">civil</code>, <code class="inline">pgtype</code>, <code class="inline">pgx/v4</code>, <code class="inline">query</code> package) &mdash; no dangling/unused imports.</li>
+  <li>Detached-partition cleanup in the up-migration correctly accounts for the partition lifecycle detaching old partitions before drop.</li>
+  <li>Test coverage: <code class="inline">TestGetTestAnalysisByJobFromToDates</code> removed with its function; <code class="inline">test/e2e/db/partitions/partitions_test.go</code> updated consistently across all 5 table-name-list occurrences.</li>
+  <li>PR description states <code class="inline">make lint</code>, <code class="inline">make test</code> (15055 tests), <code class="inline">make e2e</code>, and manual down-migration schema comparison all passed.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Now that <code class="inline">[WIP]</code> and <code class="inline">do-not-merge/work-in-progress</code> are cleared, what's still blocking removal of <code class="inline">do-not-merge/hold</code>?</li>
+  <li>Should <code class="inline">docs/plans/trt-1989-phase4-partitioned-tables.md</code> be updated or archived now that this phase is complete?</li>
+  <li>Was migration lock/runtime duration on the prod-scale partitioned table validated beyond the e2e environment?</li>
+</ul>
+
+</body>
+</html>
