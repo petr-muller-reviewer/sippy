@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3845</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fafafa;
+    margin: 0;
+    padding: 2rem 1rem;
+  }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 2rem 2.5rem;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 2px solid #eee; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88rem;
+  }
+  code {
+    background: #f0f0f0;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+  }
+  pre {
+    background: #282c34;
+    color: #e6e6e6;
+    padding: 0.9rem 1.1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  .meta {
+    background: #f5f7fa;
+    border: 1px solid #e0e6ee;
+    border-radius: 6px;
+    padding: 0.9rem 1.2rem;
+    font-size: 0.92rem;
+    margin-bottom: 1.5rem;
+  }
+  .meta div { margin: 0.15rem 0; }
+  .meta a { color: #2563eb; }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    background: #dcfce7;
+    color: #166534;
+  }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    background: #fbfbfb;
+  }
+  .finding.nit { border-left-color: #f59e0b; }
+  .finding.question { border-left-color: #6366f1; }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.nit { background: #fef3c7; color: #92400e; }
+  .badge.question { background: #e0e7ff; color: #3730a3; }
+  .loc { color: #555; font-size: 0.85rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin: 0.3rem 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>Review: openshift/sippy#3845</h1>
+  <div class="meta">
+    <div><strong>Title:</strong> TRT-2752: Add test lifecycle column to prow_job_run_tests</div>
+    <div><strong>Base:</strong> main</div>
+    <div><strong>Head SHA:</strong> <code>4f2cfc6f941482eeba05ec4319029b7451571068</code></div>
+    <div><strong>Reviewed at:</strong> 2026-07-29T22:51:57Z</div>
+    <div><strong>Link:</strong> <a href="https://github.com/openshift/sippy/pull/3845">github.com/openshift/sippy/pull/3845</a></div>
+  </div>
+
+  <h2>Verdict</h2>
+  <p><span class="verdict">Approve</span></p>
+  <p>Small, well-scoped, ingestion-only change with solid test coverage. The field is threaded correctly through every hop of the pipeline, the migration is safe on the partitioned table, and the default matches BigQuery's existing behavior. No blocking issues; only a minor observation about unvalidated lifecycle values worth a quick author confirmation.</p>
+
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Adds a <code>Lifecycle</code> field to <code>junit.TestCase</code>, parsed from the JUnit XML <code>lifecycle</code> attribute.</li>
+    <li>Threads it through <code>extractTestCases</code> → <code>types.TestCaseEntry</code> → <code>prowJobRunTestRow</code> → the COPY temp table → the final <code>INSERT</code> into <code>prow_job_run_tests</code>.</li>
+    <li>Defaults empty/missing lifecycle to <code>"blocking"</code>, matching BigQuery's <code>COALESCE(NULLIF(lifecycle, ''), 'blocking')</code>.</li>
+    <li>Adds migration 000009: <code>ALTER TABLE prow_job_run_tests ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'blocking'</code>, metadata-only on the partitioned table.</li>
+    <li>This is Phase 1 (ingestion) toward closing the BQ/PostgreSQL Component Readiness parity gap — no filtering/read-path changes yet.</li>
+  </ul>
+
+  <h2>Findings</h2>
+
+  <div class="finding nit">
+    <span class="badge nit">Nit</span><strong>normalizeLifecycle accepts unrecognized values silently</strong>
+    <div class="loc"><code>pkg/dataloader/prowloader/prow.go:1719-1727</code></div>
+    <pre>func normalizeLifecycle(raw string) string {
+    if raw == "" {
+        return "blocking"
+    }
+    return strings.ToLower(raw)
+}</pre>
+    <p>Any non-empty string is lowercased and stored as-is — there's no validation against the known <code>blocking</code>/<code>informing</code> enum. This matches BQ's equally permissive COALESCE behavior, so it's parity-consistent rather than a regression, but nothing guards against garbage values landing in the column.</p>
+  </div>
+
+  <div class="finding question">
+    <span class="badge question">Question</span><strong>Should unrecognized lifecycle values be logged or flagged?</strong>
+    <div class="loc"><code>pkg/dataloader/prowloader/prow.go:1719-1727</code></div>
+    <p>If a test source ever emits a typo'd or unexpected lifecycle value, it's silently persisted with no log signal. Is that acceptable for Phase 1, or should this be tightened before Phase 2 (filtering) starts relying on the column's values?</p>
+  </div>
+
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li>Traced the field end-to-end (XML attr → <code>TestCaseEntry</code> → <code>prowJobRunTestRow</code> → <code>testCols</code> COPY → final INSERT in <code>writeJobRunBatch</code>) — no dropped field anywhere.</li>
+    <li><code>prow_job_run_tests</code> is a partitioned parent table (<code>000001_create_partitioned_tables.up.sql</code>); confirmed <code>ADD COLUMN ... DEFAULT</code> is metadata-only on PG 11+ and propagates to partitions, matching the PR description's claim.</li>
+    <li>Migration numbering (000009) is sequential with no collisions against <code>main</code>.</li>
+    <li><code>strings</code> import was already present in <code>prow.go</code> — no import issue introduced.</li>
+    <li><code>TestExtractTestCases</code> updated with <code>Lifecycle</code> expectations on all existing cases, plus a new case covering informing/blocking/empty-default together.</li>
+    <li><code>TestNormalizeLifecycle</code> is table-driven and covers empty, blocking, informing, unknown, and mixed-case inputs.</li>
+    <li>The <code>gorm:"default:blocking"</code> tag on <code>models.ProwJobRunTest.Lifecycle</code> is redundant with the SQL default but harmless.</li>
+    <li>Other pre-existing <code>Lifecycle</code> references (<code>test_details.go</code>, BQ <code>querygenerators.go</code>) are unrelated to this column (BQ-side / JobTier-variant based) and don't need changes for this ingestion-only PR.</li>
+    <li>No README/docs update needed — internal schema/ingestion change with no API or config surface touched.</li>
+  </ul>
+
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Should <code>normalizeLifecycle</code> log a warning (or reject) when given a value outside <code>{blocking, informing}</code>, given Phase 2 will presumably filter/query on this column?</li>
+  </ul>
+
+</div>
+</body>
+</html>
