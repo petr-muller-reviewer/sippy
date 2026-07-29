@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3843</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 880px; margin: 2rem auto; padding: 0 1.5rem; background: #fdfdfd; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  code { background: #f0f0f0; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #282c34; color: #e6e6e6; padding: 1em; border-radius: 6px; overflow-x: auto; font-size: 0.85em; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.2rem; border-bottom: 2px solid #eee; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+  .header-block { background: #f5f7fa; border: 1px solid #dde3ea; border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; font-size: 0.92rem; }
+  .header-block dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0; }
+  .header-block dt { font-weight: 600; color: #555; }
+  .header-block dd { margin: 0; }
+  .verdict-box { border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; }
+  .verdict-request-changes { background: #fdecea; border: 1px solid #f5b3ac; }
+  .verdict-approve { background: #eaf7ec; border: 1px solid #a9dab0; }
+  .verdict-needs-discussion { background: #fff8e6; border: 1px solid #f0d98c; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.85rem; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 8px; padding: 1rem 1.3rem; margin-bottom: 1.2rem; }
+  .finding-blocking { border-left: 5px solid #d9534f; }
+  .finding-should-fix { border-left: 5px solid #e0a13a; }
+  .finding-nit { border-left: 5px solid #7a9ac9; }
+  .finding-question { border-left: 5px solid #9a7fc7; }
+  .sev { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.15em 0.6em; border-radius: 4px; margin-bottom: 0.5rem; }
+  .sev-blocking { background: #d9534f; color: #fff; }
+  .sev-should-fix { background: #e0a13a; color: #fff; }
+  .sev-nit { background: #7a9ac9; color: #fff; }
+  .sev-question { background: #9a7fc7; color: #fff; }
+  .loc { font-size: 0.85rem; color: #555; margin-bottom: 0.6rem; }
+  ul.checked li { margin-bottom: 0.4rem; }
+  .hl { background: #fff2a8; padding: 0.05em 0.2em; }
+</style>
+</head>
+<body>
+
+<div class="header-block">
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3843">openshift/sippy#3843</a></dd>
+    <dt>Title</dt><dd>TRT-2821: Use prefix_max_last_failure instead of LATERAL join for CR timestamps</dd>
+    <dt>Head SHA</dt><dd><code>1db815f048d87126d7754cc777310063cbed793b</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-29T11:38:10Z</dd>
+  </dl>
+</div>
+
+<div class="verdict-box verdict-request-changes">
+  <div class="verdict-label">Verdict: Request changes</div>
+  <p>The performance idea is sound and the refactor is clean, but the new <code>lastFailureExpr</code> silently depends on an invariant (an in-window failure exists) that only holds because of the <code>HAVING</code> clause &mdash; and that invariant breaks when a caller sets <code>minFail=0</code>, a validated, user-reachable query parameter. That's a real correctness gap relative to the old LATERAL join, and it's also a parity gap versus BigQuery's still window-scoped <code>last_failure</code>. Worth resolving or explicitly accepting before merge.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces a <code>LEFT JOIN LATERAL</code> against <code>prow_job_run_tests</code> with an inline <code>MAX(e.prefix_max_last_failure)</code> read from <code>test_cumulative_summaries</code>, avoiding a per-partition table scan for every candidate test.</li>
+  <li>Adds a <code>lastFailureExpr</code> field to <code>testStatusSpec</code> so the sample (prefix-sum) and base/GA query paths share one query builder; GA opts out with <code>NULL::timestamptz</code>.</li>
+  <li>As a side effect, the new per-group <code>MAX</code> is scoped correctly per <code>(test_id, suite_id, variant_group)</code>, fixing a previously-documented gap where the LATERAL wasn't scoped to the variant group.</li>
+  <li>Adds integration tests: MAX across multiple jobs, mixed NULL/non-NULL timestamps, and a GA-path NULL assertion.</li>
+  <li>Postgres-only change &mdash; BigQuery's equivalent query path is untouched.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding finding-blocking">
+  <span class="sev sev-blocking">Blocking</span>
+  <h3>LastFailure unbounded below dateRange.Start when minFail=0</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:153-179</code></div>
+  <p><code>prefix_max_last_failure</code> is an all-time cumulative running max (<code>pkg/db/cumulativesummary/cumulative_summary.go:148</code>: <code>GREATEST(prev.prefix_max_last_failure, tds.last_failure_timestamp)</code>), never reset at the window start. The query bounds it only from above (<code>e.date = lookupEnd</code>) &mdash; unlike <code>totalExpr</code>/<code>successExpr</code>/<code>flakeExpr</code>, there's no diff against a start-of-window value. Correctness today relies entirely on <code>HAVING SUM(failures) >= minimumFailure</code> guaranteeing an in-window failure exists (monotonicity then guarantees the max reflects at least that failure). But <code>minFail</code> is user-controlled, validated only as <span class="hl">v &gt;= 0</span> (<code>pkg/api/componentreadiness/utils/queryparamparser.go:384-385</code>, default 3). With <code>minFail=0</code>, <code>HAVING</code> degrades to <code>SUM(total) &gt; 0</code> &mdash; no in-window failure required &mdash; so <code>LastFailure</code> can surface a timestamp from long before <code>dateRange.Start</code> for a test with zero failures in the actual reporting window. The old LATERAL was explicitly scoped by <code>pjrt.prow_job_run_timestamp &gt;= rangeStart AND &lt; rangeEnd</code> and didn't have this gap.</p>
+  <pre>failureInner := fmt.Sprintf(`
+    SELECT
+        e.test_id, e.suite_id, vg.group_id AS variant_group_id,
+        SUM(%s) AS total_count,
+        SUM(%s) AS success_count,
+        SUM(%s) AS flake_count,
+        %s AS last_failure
+    ...
+    HAVING SUM(%s) > 0
+        AND SUM(%s) - SUM(%s) - SUM(%s) >= ?`,</pre>
+</div>
+
+<div class="finding finding-should-fix">
+  <span class="sev sev-should-fix">Should fix</span>
+  <h3>BigQuery/Postgres parity not addressed</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/bigquery/querygenerators.go:437</code> vs <code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:238</code></div>
+  <p>Project convention requires parity between data providers for query-logic changes. BigQuery's <code>last_failure</code> is strictly scoped to the date-filtered <code>junit_data</code> CTE &mdash; window-bound today. Postgres's new expression is not window-bound (see blocking finding). This PR doesn't mention BigQuery at all; if the <code>minFail=0</code> gap is real, the providers will diverge in reported <code>LastFailure</code> for that configuration. Even setting that aside, the PR should state explicitly whether this is an intentional postgres-only optimization with no observable semantic difference, or something that should also land on BigQuery.</p>
+  <pre>lastFailureExpr: "MAX(e.prefix_max_last_failure)",   // postgres, not window-bound
+
+MAX(CASE WHEN junit_data.success_val = 0
+    THEN junit_data.prowjob_start ELSE NULL END) AS last_failure  // bigquery, window-bound</pre>
+</div>
+
+<div class="finding finding-nit">
+  <span class="sev sev-nit">Nit</span>
+  <h3>lastFailureExpr windowing behavior undocumented</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:113-130</code></div>
+  <p>The <code>testStatusSpec</code> field comment and the <code>queryTestStatus</code> doc comment don't note that <code>lastFailureExpr</code> is <em>not</em> windowed the same way as <code>totalExpr</code>/<code>successExpr</code>/<code>flakeExpr</code> (those diff <code>e</code> against <code>s</code>; this one can't, since MAX isn't invertible). A future maintainer could reasonably assume all four share the same windowing semantics.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>Build passes (<code>go build ./...</code>), unit tests pass (<code>go test ./pkg/api/componentreadiness/dataprovider/postgres/...</code>).</li>
+  <li>Removed <code>lastFailureLateral</code>, <code>spec.release</code>, <code>spec.dateRange</code>, and the now-unused <code>sippyv1</code> import are fully cleaned up &mdash; no dangling references.</li>
+  <li>Verified via a monotonicity argument that in the default/common case (<code>minFail &gt;= 1</code>), <code>MAX(e.prefix_max_last_failure)</code> at <code>lookupEnd</code> is guaranteed &gt;= any in-window failure timestamp, so the change is safe for the default configuration.</li>
+  <li>GROUP BY collapsing across multiple <code>prow_job_id</code> per variant group: MAX aggregation across jobs is correct &mdash; a job with only stale (pre-window) failures can't out-rank a job with an actual in-window failure.</li>
+  <li>New GA-path assertion (<code>ts.LastFailure.IsZero()</code>) and the multi-job/mixed-NULL integration tests are sound and match existing conventions.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is <code>minFail=0</code> a realistic/supported configuration in production, or effectively unreachable in practice? If unreachable, should that be enforced (<code>v &gt;= 1</code>) or at least documented as a known limitation?</li>
+  <li>Should BigQuery receive the equivalent optimization, or is its current window-scoped <code>last_failure</code> already cheap enough that no change is needed there?</li>
+  <li>Would it be worth adding a lower-bound guard to <code>lastFailureExpr</code> (e.g. <code>CASE WHEN e.prefix_max_last_failure &gt;= ?rangeStart THEN e.prefix_max_last_failure END</code>) so correctness doesn't depend implicitly on the <code>HAVING</code> clause?</li>
+</ul>
+
+</body>
+</html>
