@@ -3,12 +3,15 @@ pr: openshift/sippy#3819
 title: "SPLAT-2814: Set Nutanix upgrade job to candidate tier"
 head_sha: 48049c693053e3dbc7ad6a4d11bf002472ecbdea
 base: main
-reviewed_at: 2026-07-29T00:44:12Z
+reviewed_at: 2026-07-29T11:51:49Z
 verdict: approve
 refresh_log:
   - old_sha: 0166dc2049c18bb10101dc4bb2da6c8fb3e32939
     new_sha: 48049c693053e3dbc7ad6a4d11bf002472ecbdea
     summary: "PR rebased onto main; PR's own code unchanged. Tests passed, /lgtm added by vr4manta, still awaiting approval."
+  - old_sha: 48049c693053e3dbc7ad6a4d11bf002472ecbdea
+    new_sha: 48049c693053e3dbc7ad6a4d11bf002472ecbdea
+    summary: "No code change. Author assigned dgoodwin for approval."
 ---
 
 ## Summary
@@ -27,6 +30,11 @@ Adds one entry to the `jobTierPatterns` table in `setJobTier` (pkg/variantregist
 ### [question] no dedicated test for this entry
 - where: `pkg/variantregistry/ocp.go:855`
 - concern: No unit test asserts a job containing `-e2e-nutanix-upgrade` resolves to `candidate`. Consistent with sibling entries in this table (e.g. `-hybrid-env`, `-vsphere-host-groups` also untested individually), so likely not a PR-specific gap, just worth a quick confirmation from the author that the real job name was checked against a live snapshot/config rather than assumed.
+
+## Since previous review (2026-07-29T00:44:12Z)
+- No code change (head still `48049c693`).
+- Author (nischawl) assigned dgoodwin for approval (2026-07-29T08:05:19Z).
+- PR still OPEN, NOT APPROVED.
 
 ## Since previous review (2026-07-25)
 - PR rebased onto main (new SHA `48049c693`); the PR's own change to `pkg/variantregistry/ocp.go` is identical.

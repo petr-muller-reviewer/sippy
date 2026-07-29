@@ -97,8 +97,8 @@
     <tr><td class="k">PR</td><td><a href="https://github.com/openshift/sippy/pull/3819">github.com/openshift/sippy/pull/3819</a></td></tr>
     <tr><td class="k">Head SHA</td><td><code>48049c693053e3dbc7ad6a4d11bf002472ecbdea</code></td></tr>
     <tr><td class="k">Base branch</td><td><code>main</code></td></tr>
-    <tr><td class="k">Reviewed at</td><td>2026-07-29T00:44:12Z</td></tr>
-    <tr><td class="k">Refresh</td><td>Updated from <code>0166dc20</code>; PR rebased, code unchanged</td></tr>
+    <tr><td class="k">Reviewed at</td><td>2026-07-29T11:51:49Z</td></tr>
+    <tr><td class="k">Refresh</td><td>No code change since <code>48049c693</code>; author assigned dgoodwin for approval</td></tr>
   </table>
 </header>
 
@@ -130,6 +130,13 @@
   <div class="loc"><code>pkg/variantregistry/ocp.go:855</code></div>
   <p>No unit test asserts that a job containing <code>-e2e-nutanix-upgrade</code> resolves to <code>candidate</code>. This matches the convention of sibling entries in the same table (e.g. <code>-hybrid-env</code>, <code>-vsphere-host-groups</code> also aren't individually tested), so it's likely not a gap specific to this PR — but worth a quick confirmation that the author checked the real job name against a live snapshot/config.</p>
 </div>
+
+<h2>Since previous review (2026-07-29T00:44:12Z)</h2>
+<ul>
+  <li>No code change (head still <code>48049c693</code>).</li>
+  <li>Author (nischawl) assigned dgoodwin for approval (2026-07-29T08:05:19Z).</li>
+  <li>PR still OPEN, NOT APPROVED.</li>
+</ul>
 
 <h2>Since previous review (2026-07-25)</h2>
 <ul>
