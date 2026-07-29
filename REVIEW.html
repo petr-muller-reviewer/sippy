@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3834</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1b1b1b;
+    background: #fdfdfd;
+    margin: 0;
+    padding: 2rem 1rem;
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  header {
+    border-bottom: 2px solid #222;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.4rem;
+  }
+  .meta {
+    font-size: 0.9rem;
+    color: #555;
+  }
+  .meta code {
+    background: none;
+  }
+  h2 {
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+  }
+  .verdict {
+    background: #eaf7ea;
+    border-left: 4px solid #2c8a2c;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+  }
+  .finding h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.05rem;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .tag.nit { background: #fff3cd; color: #7a5c00; }
+  .loc {
+    font-size: 0.85rem;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  ul { padding-left: 1.3rem; }
+  li { margin: 0.35rem 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>TRT-2834: Add stored test_flakes column to prow_job_runs</h1>
+  <div class="meta">
+    <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3834">openshift/sippy#3834</a></div>
+    <div><strong>Head SHA:</strong> <code>38d0afd420db8ec1acf6a23e60f3287e66327c9f</code></div>
+    <div><strong>Base:</strong> <code>main</code></div>
+    <div><strong>Reviewed:</strong> 2026-07-28T23:55:25Z</div>
+  </div>
+</header>
+
+<h2>Verdict</h2>
+<div class="verdict">Approve.</div>
+<p>Small, well-scoped, additive change that mirrors the existing <code>test_failures</code> pattern closely across the loader, seed data, and model. No correctness issues found; only minor suggestions around durability of the backfill script and test coverage.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a denormalized <code>test_flakes</code> int column to <code>prow_job_runs</code> via GORM <code>AutoMigrate</code> (<code>NOT NULL DEFAULT 0</code>), matching how <code>test_failures</code> already works.</li>
+  <li>Postgres prow loader now counts tests with status <code>TestStatusFlake</code> (13) alongside failures during JUnit ingestion and stores both.</li>
+  <li>Seed data generation (<code>cmd/sippy/seed_data.go</code>) updates both counts in one parameterized SQL statement instead of a single hardcoded status.</li>
+  <li>Prerequisite for TRT-2814 (retiring <code>prow_job_runs_report_matview</code>) — the column isn't read/consumed by anything yet in this PR.</li>
+  <li>A PL/pgSQL backfill script for existing rows is included in the PR description (tested on staging: 2,337 partitions, ~252k rows, ~5 min) but not committed to the repo.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="tag nit">Nit</span>Backfill script not committed to repo</h3>
+  <div class="loc">PR description (not a tracked file)</div>
+  <p>Project convention keeps docs/runbooks in the same PR as the code they support. A backfill script touching 250k+ prod rows living only in the PR description means it disappears from repo history once the PR scrolls out of view. Consider committing it under something like <code>scripts/</code>.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="tag nit">Nit</span>No unit test coverage for new flake-counting branch</h3>
+  <div class="loc"><code>pkg/dataloader/prowloader/prow.go:1690-1697</code></div>
+  <pre>switch tc.Status {
+case int(sippyprocessingv1.TestStatusFailure):
+    failures++
+case int(sippyprocessingv1.TestStatusFlake):
+    flakes++
+}</pre>
+  <p><code>prowJobRunTestsFromGCS</code>/<code>buildJobRunResult</code> have no existing unit tests (pre-existing gap), and this PR doesn't add one for the new counting split. Low risk since the pattern mirrors the existing, already-battle-tested <code>test_failures</code> logic exactly — but this column is about to become load-bearing for TRT-2814, so a small table-driven test would be cheap insurance.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>ProwJobRun</code> is in the <code>AutoMigrate</code> model list (<code>pkg/db/db.go:152</code>), and <code>prow_job_runs</code> itself is not one of the partitioned tables (only <code>prow_job_run_tests</code>/<code>prow_job_run_test_outputs</code> are) — the "metadata-only ADD COLUMN" claim in the description checks out.</li>
+  <li><code>writeJobRunBatch</code>'s INSERT into <code>prow_job_runs</code> is insert-only (no <code>ON CONFLICT</code>), so there's no upsert path that could silently skip populating <code>test_flakes</code>.</li>
+  <li>Status constants (<code>TestStatusFailure</code>=12, <code>TestStatusFlake</code>=13) are used correctly, consistent with the prior commit's move away from magic numbers in seed data.</li>
+  <li><code>seed_data.go</code>'s UPDATE correctly parameterizes both status codes rather than hardcoding one.</li>
+  <li>No BigQuery data provider populates <code>prow_job_runs</code> test counts — this table is Postgres-only ingestion, so there's no cross-provider parity gap to worry about.</li>
+  <li><code>gofmt -l</code> is clean on all three changed files.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the backfill script going to be committed anywhere (e.g. <code>scripts/</code>) for future reference, or is it intentionally one-off/throwaway?</li>
+  <li>Any plan to add regression coverage for the flake/failure counting logic before TRT-2814 starts depending on <code>test_flakes</code> being accurate?</li>
+</ul>
+
+</div>
+</body>
+</html>
