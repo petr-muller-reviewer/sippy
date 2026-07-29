@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3835</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table {
+    border-collapse: collapse;
+  }
+  header table td {
+    padding: 0.15rem 0.75rem 0.15rem 0;
+    vertical-align: top;
+  }
+  header table td:first-child {
+    color: #666;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 0.3rem;
+  }
+  .verdict-box {
+    background: #eafaf1;
+    border: 1px solid #b7e4c7;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+  }
+  .verdict-label {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #1e6b3e;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .finding h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15em 0.6em;
+    border-radius: 999px;
+    margin-right: 0.5em;
+  }
+  .badge-blocking { background: #fde2e2; color: #9b1c1c; }
+  .badge-should-fix { background: #fef3c7; color: #92660a; }
+  .badge-nit { background: #e0e7ff; color: #3730a3; }
+  .badge-question { background: #e5e7eb; color: #374151; }
+  ul { padding-left: 1.4rem; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: TRT-2835: Add integration tests for job queries and build cluster queries</h1>
+  <table>
+    <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3835">openshift/sippy#3835</a></td></tr>
+    <tr><td>Head SHA</td><td><code class="inline">35eff6e74af1482e009d4cf13c71193dc131a006</code></td></tr>
+    <tr><td>Base</td><td><code class="inline">main</code></td></tr>
+    <tr><td>Reviewed at</td><td>2026-07-28T23:55:19Z</td></tr>
+  </table>
+</header>
+
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <div class="verdict-label">✅ Approve</div>
+  <p>Solid, narrowly-scoped PR. All 58 integration tests pass locally, <code class="inline">go vet</code> and <code class="inline">gofmt</code> are clean, and the two behavioral fixes bundled in with the test additions are genuine bug fixes with direct regression coverage. Only nits remain.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds 21 new integration tests covering <code class="inline">job_queries.go</code> and <code class="inline">build_clusters.go</code>, building on the test-tier scaffolding from #3829.</li>
+  <li>Fixes a real AND/OR operator-precedence bug in <code class="inline">LoadBugsForJobs</code> that could let closed/verified bugs slip past the recency filter.</li>
+  <li>Replaces Go-side <code class="inline">gorm.ErrRecordNotFound</code> handling in <code class="inline">ProwJobHistoricalTestCounts</code> with a SQL-side <code class="inline">COALESCE</code>.</li>
+  <li>Removes a dead <code class="inline">percentages</code> CTE from <code class="inline">BuildClusterAnalysis</code> that has been unreferenced since 2022.</li>
+  <li>Adds a shared <code class="inline">test/integration/util/fixtures.go</code> helper file for building test fixtures (jobs, runs, tests, bugs).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="badge badge-nit">Nit</span>Duplicated struct-building logic between fixture constructors</h3>
+  <p><code class="inline">test/integration/util/fixtures.go:15-46</code></p>
+  <pre>func CreateProwJob(t *testing.T, dbc *db.DB, name, release string, variants []string) models.ProwJob {
+    t.Helper()
+    job := models.ProwJob{
+        Name:     name,
+        Release:  release,
+        Variants: pq.StringArray(variants),
+    }
+    require.NoError(t, dbc.DB.Create(&job).Error, "creating ProwJob %q", name)
+    return job
+}</pre>
+  <p><code class="inline">CreateProwJob</code> and <code class="inline">CreateProwJobWithOptions</code> build the identical struct. <code class="inline">CreateProwJob</code> could just delegate to <code class="inline">CreateProwJobWithOptions(t, dbc, name, release, variants)</code> with no options, removing the duplication.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="badge badge-nit">Nit</span>Unused fixture helper</h3>
+  <p><code class="inline">test/integration/util/fixtures.go:62-67</code></p>
+  <pre>func CreateSuite(t *testing.T, dbc *db.DB, name string) models.Suite {</pre>
+  <p><code class="inline">CreateSuite</code> is added but not exercised by any test in this PR. Likely scaffolding for a later PR in the 7-part TRT-2835 series &mdash; worth a quick confirmation it wasn't left over by accident.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Worktree confirmed at PR head (<code class="inline">git rev-parse HEAD</code> matches <code class="inline">headRefOid</code>).</li>
+  <li><b>LoadBugsForJobs precedence fix</b>: old code produced <code class="inline">A OR B and C and D</code>, which SQL parses as <code class="inline">A OR (B and C and D)</code> since AND binds tighter &mdash; closed/verified bugs modified recently could leak past the status filter. The fix wraps the whole <code class="inline">timeLimit</code> string in parens. Covered by <code class="inline">TestLoadBugsForJobsExcludesStaleClosedBugs</code> and <code class="inline">TestLoadBugsForJobsFiltersVerified</code>.</li>
+  <li><b>ProwJobHistoricalTestCounts COALESCE</b>: an aggregate query without <code class="inline">GROUP BY</code> always returns exactly one row (NULL on empty input), so <code class="inline">q.First()</code> now always succeeds &mdash; correctly replaces the old <code class="inline">ErrRecordNotFound</code> branch. Covered by <code class="inline">TestProwJobHistoricalTestCountsNoData</code>.</li>
+  <li><b>BuildClusterAnalysis dead CTE removal</b>: confirmed the final <code class="inline">SELECT</code> never referenced <code class="inline">percentages</code>; <code class="inline">count(*)</code> under <code class="inline">GROUP BY</code> can't be zero, so no new division-by-zero risk.</li>
+  <li>No BigQuery equivalents exist for either modified query function, so the project's provider-parity rule doesn't apply.</li>
+  <li>Ran <code class="inline">make integration</code> locally: 58/58 tests pass (needed to start <code class="inline">podman.socket</code> and set <code class="inline">TESTCONTAINERS_RYUK_DISABLED=true</code> in this dev environment &mdash; unrelated to the PR itself).</li>
+  <li><code class="inline">go vet ./pkg/db/query/... ./test/integration/...</code> clean.</li>
+  <li><code class="inline">gofmt -l</code> on all changed files: clean.</li>
+  <li><code class="inline">TestLoadBugsForJobsMultipleJobIDsReturnsFirstOnly</code> and <code class="inline">TestLoadBugsForJobsEmptyJobIDs</code> intentionally document pre-existing quirky behavior (<code class="inline">First()</code> on multi-ID query, empty-slice error) rather than hiding it &mdash; matches the TODO already in source.</li>
+  <li>The <code class="inline">NULLIF(0,0)</code> &rarr; <code class="inline">0.0</code> comment in <code class="inline">TestBuildClusterHealthZeroRunsInPreviousPeriod</code> verified against <code class="inline">models.BuildClusterHealthReport</code> (plain, non-pointer <code class="inline">float64</code> field) &mdash; accurate.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is <code class="inline">CreateSuite</code> in <code class="inline">fixtures.go</code> intentionally unused scaffolding for a later PR in the series, or should it be dropped until it's needed?</li>
+</ul>
+
+</body>
+</html>
