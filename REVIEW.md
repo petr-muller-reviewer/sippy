@@ -1,22 +1,26 @@
 ---
 pr: openshift/sippy#3826
 title: "TRT-2737: Remove test_analysis_by_job_by_dates table and BQ loader"
-head_sha: d9996493ae47cfa02d77f7f7a348a3b3ec0873e1
+head_sha: 14d3cc22b8e5994746a0bf1517b0d02c0f598620
 base: main
-reviewed_at: 2026-07-26T11:25:35Z
+reviewed_at: 2026-07-29T11:39:01Z
 verdict: approve
 refresh_log:
   - from: d9996493ae47cfa02d77f7f7a348a3b3ec0873e1
     to: d9996493ae47cfa02d77f7f7a348a3b3ec0873e1
     at: 2026-07-26T11:25:35Z
     summary: no code change; WIP label/title removed and ready-for-human-review added (hold label persists); CI e2e passed; CodeRabbit raised and withdrew two findings after author explanation (view-restore necessity, e2e partition coverage gap).
+  - from: d9996493ae47cfa02d77f7f7a348a3b3ec0873e1
+    to: 14d3cc22b8e5994746a0bf1517b0d02c0f598620
+    at: 2026-07-29T11:39:01Z
+    summary: rebase onto main (migration renumbered 000008->000009 to avoid collision with newly-merged 000008_add_summary_timestamps); one additional line removed in test/integration/util/schema.go (new file added by an intervening PR) to keep the model removal complete; content of all previously-reviewed files unchanged. CI e2e passed. CodeRabbit posted two low-value nitpicks on pre-existing code outside this PR's diff.
 ---
 
 ## Summary
 
 Phase 2 of TRT-2737. Removes the now-dead `test_analysis_by_job_by_dates` table, its BigQuery loader (`loadDailyTestAnalysisByJob`), GORM model, BQ label constant, partition registration, and dead helpers (`LoadProwJobCache`, `LoadTestCache`) that were only used by the removed loader. Adds migration 000008 to drop the table, its dependent view, and any detached partitions. Updates the `RunMigrations` baseline-detection probe from the removed table to `prow_job_run_tests`. Corrects a stale comment on `plan_cache_mode=force_custom_plan`.
 
-Since previous review: no code changes (head SHA unchanged). Author removed the `[WIP]` title prefix and the `do-not-merge/work-in-progress` label, and the PR gained `ready-for-human-review`; `do-not-merge/hold` is still present. CI ran `/test e2e` and all tests passed. CodeRabbit reviewed and raised two findings, both withdrawn after the author's explanation (see Resolved).
+Since previous review: PR was rebased onto main (`d9996493a` -> `14d3cc22b`). Migration renumbered `000008` -> `000009_drop_test_analysis_by_job_by_dates` because `000008_add_summary_timestamps` landed on main in the interim (TRT-2821). One new line removed in `test/integration/util/schema.go` (`&models.TestAnalysisByJobByDate{}`), a file added by another intervening PR (TRT-2833 integration test tier) that needed the same model-removal treatment. All other previously-reviewed files are byte-for-byte unchanged in content. CI ran `/test e2e` and passed. CodeRabbit posted two nitpicks, both on pre-existing code untouched by this PR's diff (out of scope).
 
 ## Findings
 
@@ -25,7 +29,7 @@ Since previous review: no code changes (head SHA unchanged). Author removed the 
 - concern: Still extensively references `test_analysis_by_job_by_dates` / `TestAnalysisByJobByDate`. Likely fine to leave as a point-in-time planning record rather than living docs, but worth confirming with the team whether `docs/plans/` docs get updated/archived once their work completes (project convention requires docs+code in the same PR for docs that describe current behavior).
 
 ### [question] Migration lock duration on large prod table
-- where: `pkg/db/migrations/000008_drop_test_analysis_by_job_by_dates.up.sql`
+- where: `pkg/db/migrations/000009_drop_test_analysis_by_job_by_dates.up.sql`
 - concern: The old `plan_cache_mode` comment (now rewritten) mentioned 10k+ partitions on this table causing 17+ minute planner enumeration. Dropping the parent table plus that many partitions in one migration transaction could hold locks/take a while in prod. PR description confirms `make e2e` passed with the migration, but e2e likely has far fewer partitions than prod — worth confirming rollout timing/lock expectations are acceptable.
 
 ## Resolved
@@ -36,7 +40,7 @@ Since previous review: no code changes (head SHA unchanged). Author removed the 
 - resolution: Author removed the `[WIP]` title prefix and the `do-not-merge/work-in-progress` label; PR gained `ready-for-human-review`. `do-not-merge/hold` still present — merge readiness still gated on that, not on WIP status.
 
 ### [question] Down-migration should restore the dropped view (raised by CodeRabbit)
-- where: `pkg/db/migrations/000008_drop_test_analysis_by_job_by_dates.down.sql`
+- where: `pkg/db/migrations/000009_drop_test_analysis_by_job_by_dates.down.sql`
 - concern: CodeRabbit initially flagged that the down migration doesn't recreate `prow_test_analysis_by_variant_14d_view`.
 - resolution: Author explained the view had no canonical definition to restore — it was dynamically created by application code removed in Phase 1 (#3747), which also removed the view's registration in `pkg/db/views.go` and its only consumer. CodeRabbit verified against #3747 and withdrew the finding. Consistent with this review's own "Checked" note that the view isn't tracked in `views.go`.
 
@@ -44,6 +48,10 @@ Since previous review: no code changes (head SHA unchanged). Author removed the 
 - where: `test/e2e/db/partitions/partitions_test.go`
 - concern: CodeRabbit noted `test_daily_totals` and `test_cumulative_summaries` aren't covered by the partition lifecycle e2e test.
 - resolution: Author clarified this is a pre-existing gap from #3747 (which added those tables without e2e coverage), not a regression introduced by this removal-only PR. CodeRabbit agreed and withdrew the finding.
+
+### [nit] CodeRabbit nitpicks on pre-existing code (out of scope)
+- where: `pkg/db/query/job_queries.go:118-123`, `pkg/dataloader/prowloader/prow.go:213-219`
+- concern: CodeRabbit's 2026-07-28 review posted two "Trivial/Low value" nitpicks (inclusive vs. half-open window semantics in a job query; hoisting a duplicated `pl.resolveLoadSince()` call). Verified neither line falls within this PR's diff — both are in code CodeRabbit re-scanned incidentally because the surrounding file changed. No action needed for this PR.
 
 ## Checked
 
@@ -55,6 +63,8 @@ Since previous review: no code changes (head SHA unchanged). Author removed the 
 - Detached-partition cleanup in the up-migration (`DO $$ ... $$` block matching `test_analysis_by_job_by_dates_%`) correctly accounts for the partition lifecycle detaching old partitions before drop.
 - Test coverage: `TestGetTestAnalysisByJobFromToDates` removed with its function; `test/e2e/db/partitions/partitions_test.go` updated consistently across all 5 table-name-list occurrences.
 - PR description states `make lint`, `make test` (15055 tests), `make e2e`, and manual down-migration schema comparison all passed.
+- Post-rebase: `test/integration/util/schema.go` (added by an intervening PR, TRT-2833) correctly drops `&models.TestAnalysisByJobByDate{}` from its integration-test schema setup, keeping the model removal complete.
+- Post-rebase: diffed every previously-reviewed file's new content against the original review — byte-for-byte identical aside from the migration renumbering (000008 -> 000009) and MANIFEST entry.
 
 ## Open questions
 
