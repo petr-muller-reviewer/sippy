@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3838</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1c1e21;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fff;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: #f6f8fa;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e1e4e8;
+  }
+  code.inline {
+    background: #f6f8fa;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #e1e4e8;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header h1 { margin-bottom: 0.2rem; font-size: 1.4rem; }
+  header .meta { color: #57606a; font-size: 0.92rem; }
+  header .meta div { margin: 0.15rem 0; }
+  .verdict {
+    padding: 1rem 1.2rem;
+    border-radius: 8px;
+    margin: 1.2rem 0 2rem;
+    border-left: 5px solid;
+  }
+  .verdict.approve { background: #e6ffed; border-color: #2ea44f; }
+  .verdict.request-changes { background: #ffeef0; border-color: #d73a49; }
+  .verdict.needs-discussion { background: #fff8e6; border-color: #d9a800; }
+  .verdict h2 { margin: 0 0 0.4rem; font-size: 1.1rem; }
+  h2.section { border-bottom: 1px solid #e1e4e8; padding-bottom: 0.3rem; margin-top: 2.2rem; }
+  .finding {
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left: 5px solid #d73a49; }
+  .finding.should-fix { border-left: 5px solid #d9a800; }
+  .finding.nit { border-left: 5px solid #6a737d; }
+  .finding.question { border-left: 5px solid #0969da; }
+  .finding h3 { margin: 0 0 0.5rem; font-size: 1.02rem; }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15em 0.6em;
+    border-radius: 10px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #ffeef0; color: #d73a49; }
+  .badge.should-fix { background: #fff8e6; color: #9a7600; }
+  .badge.nit { background: #f1f2f4; color: #57606a; }
+  .badge.question { background: #ddf4ff; color: #0969da; }
+  .loc { color: #57606a; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  ul.plain li { margin: 0.4rem 0; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: TRT-2814: Eliminate payload_test_failures_14d_matview</h1>
+  <div class="meta">
+    <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3838">openshift/sippy#3838</a></div>
+    <div><strong>Head SHA:</strong> <code class="inline">76fe2aef7e2491491e83d0276c3a2661a4d67ab5</code></div>
+    <div><strong>Base branch:</strong> <code class="inline">main</code></div>
+    <div><strong>Reviewed at:</strong> 2026-07-28T22:41:36Z</div>
+  </div>
+</header>
+
+<div class="verdict approve">
+  <h2>Verdict: Approve</h2>
+  <p>The core rewrite is correct and the accompanying <code class="inline">sort.Slice</code> stability fixes are legitimate bug fixes independent of the matview removal. Test coverage for the new query is thorough. Remaining items are should-fix/nit/question level &mdash; none block merge in my view, but I'd like the matview-cleanup and boundary-semantics questions answered before or shortly after merge.</p>
+</div>
+
+<h2 class="section">What this PR does</h2>
+<ul class="plain">
+  <li>Replaces <code class="inline">payload_test_failures_14d_matview</code> with a direct, partition-pruned SQL query (<code class="inline">query.GetTestFailuresForPayloadStream</code>) returning one pre-aggregated row per test (via <code class="inline">array_agg</code>) instead of one row per (test, job, payload) tuple.</li>
+  <li>Fixes two <code class="inline">sort.Slice</code> comparators that violated strict weak ordering (used <code class="inline">&gt;=</code> instead of strict comparisons), adding deterministic tiebreakers (FailureCount, then Name).</li>
+  <li>Corrects the blocker-score reason string to say "not Rejected" instead of "Accepted", handling intermediate phases like "Ready".</li>
+  <li>Locks down <code class="inline">/api/releases/test_failures</code> to reject client-supplied sort params (400) since results are now pre-sorted server-side.</li>
+  <li>Updates <code class="inline">scripts/rejected-payloads.py</code> to a raw parameterized query mirroring the removed matview, and adds 36 new integration tests.</li>
+</ul>
+
+<h2 class="section">Findings</h2>
+
+<h3 style="margin-bottom:0.6rem;">Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><h3 style="display:inline;">Confirm matview drop on deploy</h3>
+  <div class="loc"><code class="inline">pkg/db/views.go:20-30</code></div>
+  <p>Removing the <code class="inline">payload_test_failures_14d_matview</code> entry from the <code class="inline">PostgresMatViews</code> slice stops future refresh/creation, but it's not evident from the diff whether the migration/db-init layer issues a <code class="inline">DROP MATERIALIZED VIEW</code> for matviews removed from this list, or whether the object is simply left orphaned (harmless, but dead weight) in production Postgres.</p>
+  <pre>-	{
+-		Name:           "payload_test_failures_14d_matview",
+-		Definition:     payloadTestFailuresMatView,
+-		IndexColumns:   []string{"release", "architecture", "stream", "prow_job_run_id", "test_id", "suite_id"},
+-		ReplaceStrings: map[string]string{},
+-	},</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><h3 style="display:inline;">release_time boundary/clock semantics changed</h3>
+  <div class="loc"><code class="inline">pkg/db/query/payload_queries.go:52-84</code></div>
+  <p>Old matview used <code class="inline">rt.release_time &gt; (NOW() - 14 days)</code> (strict, wall-clock). New query uses <code class="inline">reportEnd.Add(-14 * 24h)</code> with <code class="inline">&gt;=</code>. This is a minor boundary widening plus a switch from <code class="inline">NOW()</code> to the caller-supplied <code class="inline">reportEnd</code> &mdash; likely intentional and more testable, but not called out in the PR description.</p>
+  <pre>fourteenDaysAgo := reportEnd.Add(-14 * 24 * time.Hour)
+...
+WHERE rt.release = ?
+  AND rt.architecture = ?
+  AND rt.stream = ?
+  AND rt.release_time &gt;= ?</pre>
+</div>
+
+<h3 style="margin-bottom:0.6rem;">Nits</h3>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><h3 style="display:inline;">No test for single-payload sort tiebreaker</h3>
+  <div class="loc"><code class="inline">pkg/api/releases.go:128-133</code> (<code class="inline">GetPayloadTestFailures</code>)</div>
+  <p>The stream path's tiebreaker sort is covered by <code class="inline">TestGetPayloadStreamTestFailures_SortTiebreakers</code>, but the analogous fix in the single-payload path has no direct test. Same pattern, low risk.</p>
+  <pre>sort.Slice(testFailures, func(i, j int) bool {
+	if testFailures[i].FailureCount != testFailures[j].FailureCount {
+		return testFailures[i].FailureCount &gt; testFailures[j].FailureCount
+	}
+	return testFailures[i].Name &lt; testFailures[j].Name
+})</pre>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><h3 style="display:inline;">No test for new 400 branch on sort rejection</h3>
+  <div class="loc"><code class="inline">pkg/sippyserver/server.go:626-635</code></div>
+  <p>The new <code class="inline">filterOpts.SortField != ""</code> &rarr; 400 check in <code class="inline">jsonGetPayloadAnalysis</code> has no test coverage. Small, easily-eyeballed handler change, so this is minor.</p>
+  <pre>if filterOpts.SortField != "" {
+	failureResponse(w, http.StatusBadRequest, "sorting is not supported for this endpoint")
+	return
+}</pre>
+</div>
+
+<h3 style="margin-bottom:0.6rem;">Questions</h3>
+
+<div class="finding question">
+  <span class="badge question">question</span><h3 style="display:inline;">rejected-payloads.py raw query untested</h3>
+  <div class="loc"><code class="inline">scripts/rejected-payloads.py:27-53</code></div>
+  <p>The ORM-mapped matview access was replaced with a raw parameterized <code class="inline">text()</code> query. Parameters are bound correctly (no injection risk) and logic mirrors the old view's WHERE clause, but this script has no automated coverage. Was it manually run against a real DB to confirm <code class="inline">Row</code> attribute access (<code class="inline">test_failure.prow_job_name</code>, <code class="inline">.name</code>) works with the installed SQLAlchemy version?</p>
+</div>
+
+<h2 class="section">Things I checked and was fine with</h2>
+<ul class="plain">
+  <li>Partition pruning: <code class="inline">rt.release = ?</code> + <code class="inline">pjrt.prow_job_run_release = ?</code> using the same literal is logically equivalent to the old column-to-column join, since both are pinned to the same value &mdash; correct and now prunable.</li>
+  <li>Dropping <code class="inline">SELECT DISTINCT</code> from the old matview is safe: <code class="inline">release_job_runs</code> has a unique index on <code class="inline">prow_job_run_id</code> enforced via <code class="inline">ON CONFLICT (prow_job_run_id) DO UPDATE</code> in the loader, so the duplicate-row risk the old <code class="inline">TODO</code> comment warned about cannot occur today.</li>
+  <li><code class="inline">sort.Slice</code> comparators in both stream and single-payload paths were previously non-strict-weak-order (<code class="inline">&gt;=</code>-based) &mdash; undefined behavior per Go's <code class="inline">sort</code> docs for equal elements. New tiebreaker chains fix this correctly.</li>
+  <li><code class="inline">array_agg(... ORDER BY pj.name, pjr.id)</code> produces deterministic parallel arrays; per-release-tag sub-ordering by job name is preserved since the global sort key is a superset ordering. Confirmed by <code class="inline">TestGetPayloadStreamTestFailures_MultipleJobsPerPayload</code>.</li>
+  <li><code class="inline">filter.FilterableDBResult</code> only calls <code class="inline">.Order()</code> when <code class="inline">SortField</code> is non-empty, so the new empty default sort field in <code class="inline">jsonGetPayloadAnalysis</code> doesn't leak an unintended default ordering.</li>
+  <li><code class="inline">gofmt -l</code> and <code class="inline">go vet</code> are clean on all touched Go files.</li>
+  <li>Integration test coverage (36 tests) is thorough: window boundaries, stream/arch filtering, multi-payload aggregation, multi-job-per-payload arrays, blocker score + streak-override math, sort tiebreakers, <code class="inline">openshift-tests</code> exclusion, force-accepted-payload-with-failed-blocking-job edge case.</li>
+</ul>
+
+<h2 class="section">Open questions for the author</h2>
+<ul class="plain">
+  <li>Does removing an entry from <code class="inline">PostgresMatViews</code> drop the existing materialized view object on deploy, or is that a needed follow-up migration?</li>
+  <li>Was the <code class="inline">release_time</code> boundary change (<code class="inline">&gt;</code> &rarr; <code class="inline">&gt;=</code>, <code class="inline">NOW()</code> &rarr; <code class="inline">reportEnd</code>) intentional, or a side effect of reusing <code class="inline">reportEnd</code>?</li>
+  <li>Was <code class="inline">scripts/rejected-payloads.py</code> manually exercised against a real database after the raw-query rewrite?</li>
+</ul>
+
+</body>
+</html>
