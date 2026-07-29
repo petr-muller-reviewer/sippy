@@ -85,11 +85,15 @@
   <h1>Review: TRT-2814: Eliminate payload_test_failures_14d_matview</h1>
   <div class="meta">
     <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3838">openshift/sippy#3838</a></div>
-    <div><strong>Head SHA:</strong> <code class="inline">76fe2aef7e2491491e83d0276c3a2661a4d67ab5</code></div>
+    <div><strong>Head SHA:</strong> <code class="inline">93058eb9923093093c611e031529d7e923f3ab3f</code></div>
     <div><strong>Base branch:</strong> <code class="inline">main</code></div>
-    <div><strong>Reviewed at:</strong> 2026-07-28T22:41:36Z</div>
+    <div><strong>Reviewed at:</strong> 2026-07-29T22:53:20Z</div>
   </div>
 </header>
+
+<div style="background:#f6f8fa; border:1px solid #e1e4e8; border-radius:8px; padding:0.9rem 1.2rem; margin-bottom:1.5rem; font-size:0.92rem; color:#57606a;">
+  <strong>Refresh (2026-07-29):</strong> rebase-only update from <code class="inline">76fe2aef7</code> to <code class="inline">93058eb99</code> &mdash; ~30 unrelated merged commits picked up (including an unrelated componentreadiness handler refactor touching <code class="inline">pkg/sippyserver/server.go</code>). No PR-authored content changed in the files this review covers. New discussion: reviewer <strong>neisw</strong> asked whether the partition-pruning filter should also cover <code class="inline">prow_job_runs</code> (release + timestamp) in both <code class="inline">payload_queries.go:77</code> and <code class="inline">rejected-payloads.py:49</code>; author <strong>mstaeble</strong> agreed but hasn't pushed a commit yet.
+</div>
 
 <div class="verdict approve">
   <h2>Verdict: Approve</h2>
@@ -108,6 +112,18 @@
 <h2 class="section">Findings</h2>
 
 <h3 style="margin-bottom:0.6rem;">Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><h3 style="display:inline;">Add prow_job_runs partition filter (in progress, per review thread)</h3>
+  <div class="loc"><code class="inline">pkg/db/query/payload_queries.go:77</code>, <code class="inline">scripts/rejected-payloads.py:49</code></div>
+  <p>Reviewer <strong>neisw</strong> pointed out <code class="inline">prow_job_runs</code> is slated for partitioning and already has <code class="inline">idx_prow_job_runs_release_timestamp</code>; suggested adding release+timestamp filtering on <code class="inline">pjr</code> now in both the new query and the script, matching the pruning already done for <code class="inline">prow_job_run_tests</code>. Author <strong>mstaeble</strong> agreed (2026-07-29T19:36:14Z) but had not pushed a commit as of this refresh.</p>
+  <pre>payload_queries.go:77 (neisw): "prow_job_runs should be partitioned soonish
+... should we just add the filtering in now so we don't have to update it
+later?"
+rejected-payloads.py:49 (neisw): "same prow_job_runs filter / index question
+here"
+mstaeble: "Yes, absolutely. Let me do that."</pre>
+</div>
 
 <div class="finding should-fix">
   <span class="badge should-fix">should-fix</span><h3 style="display:inline;">Confirm matview drop on deploy</h3>
@@ -181,6 +197,7 @@ WHERE rt.release = ?
   <li>Does removing an entry from <code class="inline">PostgresMatViews</code> drop the existing materialized view object on deploy, or is that a needed follow-up migration?</li>
   <li>Was the <code class="inline">release_time</code> boundary change (<code class="inline">&gt;</code> &rarr; <code class="inline">&gt;=</code>, <code class="inline">NOW()</code> &rarr; <code class="inline">reportEnd</code>) intentional, or a side effect of reusing <code class="inline">reportEnd</code>?</li>
   <li>Was <code class="inline">scripts/rejected-payloads.py</code> manually exercised against a real database after the raw-query rewrite?</li>
+  <li>(resolved by review thread, pending push) When will the <code class="inline">prow_job_runs</code> release/timestamp filter land, given author agreement on 2026-07-29?</li>
 </ul>
 
 </body>

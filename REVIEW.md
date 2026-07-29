@@ -1,10 +1,22 @@
 ---
 pr: openshift/sippy#3838
 title: "TRT-2814: Eliminate payload_test_failures_14d_matview"
-head_sha: 76fe2aef7e2491491e83d0276c3a2661a4d67ab5
+head_sha: 93058eb9923093093c611e031529d7e923f3ab3f
 base: main
-reviewed_at: 2026-07-28T22:41:36Z
+reviewed_at: 2026-07-29T22:53:20Z
 verdict: approve
+refresh_log:
+  - from: 76fe2aef7e2491491e83d0276c3a2661a4d67ab5
+    to: 93058eb9923093093c611e031529d7e923f3ab3f
+    summary: >
+      Rebase onto newer main only (~30 unrelated merged commits picked up,
+      including an unrelated componentreadiness handler refactor touching
+      pkg/sippyserver/server.go). No PR-authored content changed in the files
+      this review covers. New review discussion: neisw asked whether the
+      partition-pruning filter should also cover prow_job_runs (release +
+      timestamp, via idx_prow_job_runs_release_timestamp) in both
+      payload_queries.go:77 and rejected-payloads.py:49; mstaeble agreed to
+      add it but has not yet pushed a commit.
 ---
 
 ## Summary
@@ -17,6 +29,17 @@ string, rejects sort params on `/api/releases/test_failures` (400), and updates
 `scripts/rejected-payloads.py` to match. Adds 36 integration tests.
 
 ## Findings
+
+### [should-fix] add prow_job_runs partition filter (in progress, per review thread)
+- where: `pkg/db/query/payload_queries.go:77`, `scripts/rejected-payloads.py:49`
+- concern: Reviewer neisw pointed out `prow_job_runs` is slated for partitioning (per `docs/plans/trt-1989-phase4-partitioned-tables.md`) and already has `idx_prow_job_runs_release_timestamp`; suggested adding release+timestamp filtering on `pjr` now in both the new query and the script, matching the pruning already done for `prow_job_run_tests`, to avoid a follow-up update later. Author (mstaeble) agreed on 2026-07-29T19:36:14Z but had not pushed a commit as of this refresh (head_sha unchanged for these files).
+- excerpt: |
+    # payload_queries.go:77 (neisw, 2026-07-29T19:23:42Z)
+    "prow_job_runs should be partitioned soonish ... should we just add the
+    filtering in now so we don't have to update it later?"
+    # rejected-payloads.py:49 (neisw, 2026-07-29T19:28:00Z)
+    "same prow_job_runs filter / index question here"
+    # mstaeble, 2026-07-29T19:36:14Z: "Yes, absolutely. Let me do that."
 
 ### [should-fix] confirm matview drop on deploy
 - where: `pkg/db/views.go:20-30` (removed entry from `PostgresMatViews`)
@@ -79,3 +102,4 @@ string, rejects sort params on `/api/releases/test_failures` (400), and updates
 - Does removing an entry from `PostgresMatViews` drop the existing materialized view object on deploy, or is cleanup needed as a follow-up migration?
 - Was the `release_time` boundary change (`>` → `>=`, `NOW()` → `reportEnd`) intentional, or just a side effect of reusing `reportEnd`?
 - Was `scripts/rejected-payloads.py` manually exercised against a real database after the raw-query rewrite?
+- (resolved by review thread, pending push) When will the `prow_job_runs` release/timestamp filter land, given author agreement on 2026-07-29?
