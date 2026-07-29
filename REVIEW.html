@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3819</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fff;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  code {
+    background: #f2f2f2;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: #f6f6f6;
+    padding: 0.9rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e5e5e5;
+  }
+  header {
+    border-bottom: 2px solid #222;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table {
+    border-collapse: collapse;
+  }
+  header td {
+    padding: 0.15rem 0.6rem 0.15rem 0;
+    vertical-align: top;
+  }
+  header td.k {
+    color: #666;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 0.5rem 0; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1rem;
+  }
+  .sev {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.12rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+  }
+  .sev.question { background: #e2e3ff; color: #3730a3; }
+  .loc { color: #666; font-size: 0.85em; margin-bottom: 0.5rem; }
+  ul { padding-left: 1.4rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>openshift/sippy #3819 — SPLAT-2814: Set Nutanix upgrade job to candidate tier</h1>
+  <table>
+    <tr><td class="k">PR</td><td><a href="https://github.com/openshift/sippy/pull/3819">github.com/openshift/sippy/pull/3819</a></td></tr>
+    <tr><td class="k">Head SHA</td><td><code>48049c693053e3dbc7ad6a4d11bf002472ecbdea</code></td></tr>
+    <tr><td class="k">Base branch</td><td><code>main</code></td></tr>
+    <tr><td class="k">Reviewed at</td><td>2026-07-29T00:44:12Z</td></tr>
+    <tr><td class="k">Refresh</td><td>Updated from <code>0166dc20</code>; PR rebased, code unchanged</td></tr>
+  </table>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict">Approve</span></p>
+<p>This is a narrowly-scoped, single-entry addition to an existing tier-classification table, following the established pattern exactly (comment + substring + tier). Worst case if the substring doesn't match the intended job is a silent no-op, not a regression of other jobs. No blocking issues found; only a couple of confirmation questions for the author.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a new entry to the <code>jobTierPatterns</code> list in <code>setJobTier</code> (<code>pkg/variantregistry/ocp.go</code>).</li>
+  <li>Any job whose (lowercased) name contains <code>-e2e-nutanix-upgrade</code> is now classified as <code>candidate</code> tier.</li>
+  <li>Candidate tier means the job is excluded from default Component Readiness views but data is still synced, so it can be promoted later once stable.</li>
+  <li>Comment cites CSI operator conformance failures as the reason for instability.</li>
+  <li>3 lines added, 0 removed, 1 file changed — purely additive.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="sev question">Question</span>Confirm exact substring matches the real job name</h3>
+  <div class="loc"><code>pkg/variantregistry/ocp.go:855</code></div>
+  <p>The match is a <code>strings.Contains</code> check against <code>-e2e-nutanix-upgrade</code> on the lowercased job name. Searching the test fixture (<code>pkg/variantregistry/snapshot.yaml</code>) turned up no job containing this exact substring — only unrelated <code>nutanix</code> platform jobs (agent-based QE jobs, perfscale jobs). If the real Prow job name differs slightly (e.g. <code>-nutanix-e2e-upgrade-</code>), this entry would silently no-op instead of failing loudly.</p>
+  <pre>// Nutanix upgrade job not yet stable due to CSI operator conformance failures
+{[]string{"-e2e-nutanix-upgrade"}, "candidate"},</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev question">Question</span>No dedicated test for this entry</h3>
+  <div class="loc"><code>pkg/variantregistry/ocp.go:855</code></div>
+  <p>No unit test asserts that a job containing <code>-e2e-nutanix-upgrade</code> resolves to <code>candidate</code>. This matches the convention of sibling entries in the same table (e.g. <code>-hybrid-env</code>, <code>-vsphere-host-groups</code> also aren't individually tested), so it's likely not a gap specific to this PR — but worth a quick confirmation that the author checked the real job name against a live snapshot/config.</p>
+</div>
+
+<h2>Since previous review (2026-07-25)</h2>
+<ul>
+  <li>PR rebased onto main (new SHA <code>48049c693</code>); the PR's own change to <code>pkg/variantregistry/ocp.go</code> is identical.</li>
+  <li>CI tests passed (2026-07-27).</li>
+  <li><code>/lgtm</code> added by <strong>vr4manta</strong> (2026-07-27). PR is NOT APPROVED yet (needs an approver from OWNERS).</li>
+  <li>No inline review comments or formal reviews submitted.</li>
+</ul>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Placement and style is consistent with existing <code>jobTierPatterns</code> entries (short comment + single substring + tier string).</li>
+  <li>No BigQuery/Postgres parity concern — <code>setJobTier</code> runs the same regardless of data backend.</li>
+  <li>Change is additive and narrow; a non-matching substring would be a silent no-op, not a regression affecting other jobs.</li>
+  <li>PR already carries <code>lgtm</code> and <code>ready-for-human-review</code> labels.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Can you confirm <code>-e2e-nutanix-upgrade</code> is the literal substring present in the actual Prow job name (not e.g. <code>-nutanix-e2e-upgrade-</code> or another variant)?</li>
+</ul>
+
+</body>
+</html>
