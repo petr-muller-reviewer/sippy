@@ -3,8 +3,12 @@ pr: openshift/sippy#3834
 title: "TRT-2834: Add stored test_flakes column to prow_job_runs"
 head_sha: 38d0afd420db8ec1acf6a23e60f3287e66327c9f
 base: main
-reviewed_at: 2026-07-28T23:55:25Z
+reviewed_at: 2026-07-29T11:26:13Z
 verdict: approve
+refresh_log:
+  - from: 38d0afd420db8ec1acf6a23e60f3287e66327c9f
+    to: 38d0afd420db8ec1acf6a23e60f3287e66327c9f
+    summary: No code changes or PR activity since prior review. Investigated and answered a discussion question about backfill-timing risk; recorded as a Checked item and a follow-up question, no findings changed.
 ---
 
 ## Summary
@@ -41,7 +45,9 @@ verdict: approve
 - `seed_data.go` UPDATE correctly parameterizes both status codes instead of hardcoding `12`.
 - No BigQuery data provider populates `prow_job_runs` test counts — this is a Postgres-only ingestion table, so no cross-provider parity gap.
 - `gofmt -l` clean on all three changed files.
+- Backfill-timing risk (asked/answered during refresh): nothing in the current codebase reads `prow_job_runs.test_flakes` yet. `pkg/db/views.go:217` (`test_results.flaked_test_count AS test_flakes`) is the only current consumer of a "test_flakes" name and computes it live via a join to `prow_job_run_tests`, independent of the new stored column. Confirmed via `grep -rn "prow_job_runs\.test_flakes\|r\.TestFlakes"` outside the loader/model files — no hits. So a delayed or skipped backfill is safe to merge/deploy now: existing rows just sit at the column default (0) until backfilled, invisibly, since nothing reads them. It only becomes load-bearing once TRT-2814 cuts readers over to the stored column — at that point un-backfilled rows would silently read as zero flakes (wrong data, not an error) rather than erroring, so backfill completion should be a precondition of that follow-up work, not this one.
 
 ## Open questions
 - Is the backfill script going to be committed anywhere (e.g. `scripts/`) for future reference, or is it intentionally one-off/throwaway?
 - Any plan to add regression coverage for the counting logic before TRT-2814 starts depending on `test_flakes` being accurate?
+- Will TRT-2814 explicitly gate its cutover (retiring `prow_job_runs_report_matview` / switching readers to the stored column) on backfill completion, to avoid a window where historical rows silently report zero flakes?

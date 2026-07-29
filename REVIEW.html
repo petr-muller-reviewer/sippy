@@ -95,7 +95,8 @@
     <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3834">openshift/sippy#3834</a></div>
     <div><strong>Head SHA:</strong> <code>38d0afd420db8ec1acf6a23e60f3287e66327c9f</code></div>
     <div><strong>Base:</strong> <code>main</code></div>
-    <div><strong>Reviewed:</strong> 2026-07-28T23:55:25Z</div>
+    <div><strong>Reviewed:</strong> 2026-07-29T11:26:13Z</div>
+    <div><strong>Refreshed:</strong> no code changes since 38d0afd4 (previous review); discussion-only refresh</div>
   </div>
 </header>
 
@@ -140,12 +141,14 @@ case int(sippyprocessingv1.TestStatusFlake):
   <li><code>seed_data.go</code>'s UPDATE correctly parameterizes both status codes rather than hardcoding one.</li>
   <li>No BigQuery data provider populates <code>prow_job_runs</code> test counts — this table is Postgres-only ingestion, so there's no cross-provider parity gap to worry about.</li>
   <li><code>gofmt -l</code> is clean on all three changed files.</li>
+  <li><strong>Backfill-timing risk (investigated during refresh):</strong> nothing in the current codebase reads <code>prow_job_runs.test_flakes</code> yet. <code>pkg/db/views.go:217</code> (<code>test_results.flaked_test_count AS test_flakes</code>) is the only current consumer of a "test_flakes" name, and it computes the value live via a join to <code>prow_job_run_tests</code>, entirely independent of the new stored column. A repo-wide grep for <code>prow_job_runs.test_flakes</code> / <code>r.TestFlakes</code> outside the loader and model files turned up nothing. So a delayed or skipped backfill is safe to merge and deploy now &mdash; existing rows simply sit at the column default (0) until backfilled, invisibly, since nothing reads them yet. It only becomes load-bearing once TRT-2814 cuts readers over to the stored column, at which point un-backfilled historical rows would silently report zero flakes (wrong data, not an error) rather than failing loudly.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul>
   <li>Is the backfill script going to be committed anywhere (e.g. <code>scripts/</code>) for future reference, or is it intentionally one-off/throwaway?</li>
   <li>Any plan to add regression coverage for the flake/failure counting logic before TRT-2814 starts depending on <code>test_flakes</code> being accurate?</li>
+  <li>Will TRT-2814's cutover (retiring <code>prow_job_runs_report_matview</code> / switching readers to the stored column) be explicitly gated on backfill completion, to avoid a window where historical rows silently report zero flakes?</li>
 </ul>
 
 </div>
