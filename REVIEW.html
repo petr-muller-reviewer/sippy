@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3836</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem 1.5rem;
+    background: #f9f9f9;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.5rem; }
+  h2 {
+    font-size: 1.2rem;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 0.3rem;
+    margin-top: 2.2rem;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .verdict.approve { background: #d4f4dd; color: #1a6b32; }
+  .verdict.request-changes { background: #fbdada; color: #9b1c1c; }
+  .verdict.needs-discussion { background: #fff3cd; color: #8a6300; }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    background: #fafafa;
+    border-radius: 0 6px 6px 0;
+  }
+  .finding.blocking { border-color: #c0392b; }
+  .finding.should-fix { border-color: #d68910; }
+  .finding.nit { border-color: #7f8c8d; }
+  .finding.question { border-color: #2874a6; }
+  .finding h3 { margin: 0 0 0.3rem 0; font-size: 1.02rem; }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #f5b7b1; color: #7b241c; }
+  .badge.should-fix { background: #f8d7a0; color: #7d5a00; }
+  .badge.nit { background: #d5d8dc; color: #4d5656; }
+  .badge.question { background: #aed6f1; color: #1b4f72; }
+  .loc { color: #666; font-size: 0.85rem; margin: 0.2rem 0 0.5rem 0; }
+  ul { padding-left: 1.4rem; }
+  a { color: #1a5276; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3836</h1>
+  <dl>
+    <dt>Title</dt><dd>Make /api/jobs/runs/reevaluate async with task ID + polling</dd>
+    <dt>Head SHA</dt><dd><code class="inline">9c3992c266326ea1edccc05fbca61102488abf21</code></dd>
+    <dt>Base</dt><dd><code class="inline">main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-29T00:11:18Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3836">github.com/openshift/sippy/pull/3836</a></dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict approve">APPROVE</span></p>
+<p>The core design (in-memory <code class="inline">TaskStore</code> with copy-on-read semantics, panic recovery, TTL + stuck-task cleanup, bounded concurrency) is sound and already went through visible self-hardening in the commit history. Remaining gaps are minor: missing handler-level tests, a small frontend UX/timeout mismatch, and one dead ref. None block merge.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Converts <code class="inline">POST /api/jobs/runs/reevaluate</code> to async-by-default: creates a task, launches a background goroutine, returns 202 with a task ID and HATEOAS polling link.</li>
+  <li>Adds <code class="inline">GET /api/jobs/runs/reevaluate/{task_id}</code> to poll status, progress, and (partial or final) results.</li>
+  <li>Preserves the old synchronous behavior via <code class="inline">?sync=true</code> (50-run cap); async cap raised to 500.</li>
+  <li>New thread-safe <code class="inline">TaskStore</code> with TTL cleanup, concurrency semaphore (<code class="inline">MaxConcurrentTasks = 5</code>), panic recovery, and graceful shutdown.</li>
+  <li>Rewrites the React <code class="inline">ReEvaluateSymptoms.jsx</code> component to submit the whole batch once and poll every 2s, replacing the old client-side concurrency-limited per-ID request pool.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">should-fix</span><h3>No handler-level tests</h3>
+  <p class="loc"><code class="inline">pkg/sippyserver/job_run_scan.go</code> — jsonReEvaluateJobRunSymptoms, jsonGetReEvaluationTask</p>
+  <p><code class="inline">TaskStore</code> and <code class="inline">ValidateReEvalRequest</code> are well unit-tested, but the actual HTTP surface — 202/400/429/503 on POST, 200/404 on GET, HATEOAS link injection, sync-vs-async branching — has no test coverage. This is the contract clients actually depend on.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><h3>Dead ref in frontend</h3>
+  <p class="loc"><code class="inline">sippy-ng/src/jobs/ReEvaluateSymptoms.jsx:106,222</code></p>
+  <pre>const taskIDRef = useRef(null)
+...
+taskIDRef.current = taskID
+pollingActiveRef.current = true</pre>
+  <p><code class="inline">taskIDRef.current</code> is set in <code class="inline">startPolling</code> but never read anywhere else. Either it was meant to back a guard that got dropped, or it's leftover and can be removed.</p>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">nit</span><h3>Frontend poll timeout shorter than backend task timeout</h3>
+  <p class="loc"><code class="inline">ReEvaluateSymptoms.jsx</code> (<code class="inline">MAX_POLL_COUNT=300</code>, <code class="inline">POLL_INTERVAL_MS=2000</code>) vs <code class="inline">job_run_scan.go</code> (<code class="inline">context.WithTimeout(..., 30*time.Minute)</code>)</p>
+  <p>The frontend gives up polling after ~10 minutes and shows a "timed out" error, while the server keeps processing for up to 30 minutes. For a large async batch (up to the new 500-run cap) that legitimately runs past 10 minutes, the UI reports failure while the task actually completes server-side, unobserved. Not a correctness bug, but a UX/tuning mismatch worth aligning.</p>
+</div>
+
+<div class="finding question">
+  <span class="badge question">question</span><h3>Retry can create orphaned duplicate tasks</h3>
+  <p class="loc">ReEvaluateSymptoms.jsx — handleReEvaluate retry loop</p>
+  <p>Retries only trigger on <code class="inline">TypeError</code> (network-level failures). But if the POST succeeds server-side (202, task created) and the client merely fails to read/parse the response body — e.g. a connection drop right after headers — that also surfaces as a <code class="inline">TypeError</code>, and the retry resubmits the same batch, creating a second orphaned task. It self-expires via TTL so impact is low — is this an accepted tradeoff?</p>
+</div>
+
+<div class="finding question">
+  <span class="badge question">question</span><h3>Global concurrency cap vs. new 500-run async ceiling</h3>
+  <p class="loc"><code class="inline">pkg/api/jobrunscan/reevaluate.go</code> — <code class="inline">MaxConcurrentTasks = 5</code></p>
+  <p>The cap is process-wide across all users, and each task processes buildIDs sequentially in a single goroutine. With the async cap raised to 500 runs/request, is 5 concurrent tasks system-wide sized correctly for expected usage, or could legitimate concurrent submissions from multiple users routinely hit 429?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code class="inline">go build -mod=vendor ./pkg/...</code> and <code class="inline">go vet</code> on the touched packages — clean.</li>
+  <li><code class="inline">go test ./pkg/api/jobrunscan/...</code>, including <code class="inline">-race</code> on <code class="inline">TestTaskStoreConcurrentAccess</code> — all pass.</li>
+  <li><code class="inline">TaskStore.Get()</code> returns a full deep copy (including the <code class="inline">CompletedAt</code> pointer and <code class="inline">Links</code> map) — no shared-memory races with callers; backed by dedicated tests.</li>
+  <li><code class="inline">Create()</code> returns an immutable <code class="inline">TaskCreated</code> snapshot rather than a pointer into the map; the handler builds the 202 response from this before launching the goroutine, avoiding a data race.</li>
+  <li>Panic recovery, idempotent <code class="inline">Stop()</code> via <code class="inline">sync.Once</code>, and stuck-task cleanup keyed on <code class="inline">CreatedAt</code> (not just <code class="inline">CompletedAt</code>) are present and tested — this addresses the goroutine-leak/panic risk inherent to a fire-and-forget background task pattern.</li>
+  <li><code class="inline">google/uuid</code> was already an indirect dependency in <code class="inline">go.mod</code>/vendor prior to this PR — no new third-party dependency risk.</li>
+  <li>Capability gating is consistent with existing conventions: POST keeps <code class="inline">WriteEndpointsCapability</code>, GET is read-only under <code class="inline">LocalDBCapability</code>.</li>
+  <li>Documentation (<code class="inline">pkg/api/README.md</code>, <code class="inline">docs/features/job-analysis-symptoms.md</code>) was updated in the same PR, per project convention.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the 10-minute frontend poll ceiling intentional, or should it be raised (or made configurable) to match the 30-minute backend task timeout for large batches?</li>
+  <li>Is <code class="inline">MaxConcurrentTasks = 5</code> based on a specific resource budget (memory, BigQuery/GCS rate limits), or a placeholder to revisit once there's real usage data?</li>
+  <li>Any plan to add handler-level (<code class="inline">httptest</code>-based) tests for the new POST/GET endpoints before or shortly after merge?</li>
+</ul>
+
+</body>
+</html>
