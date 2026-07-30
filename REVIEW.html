@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3853</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0 0 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.1rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+    margin-top: 2rem;
+  }
+  .verdict {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.3em 0.8em;
+    border-radius: 4px;
+    background: #d4edda;
+    color: #155724;
+  }
+  .finding {
+    border: 1px solid #ddd;
+    border-left-width: 5px;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.question { border-left-color: #6c757d; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .badge {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5em;
+  }
+  .badge.question { background: #e2e3e5; color: #383d41; }
+  ul.checklist li { margin-bottom: 0.3rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: Remove prow_ga_test_statuses_matview reintroduced by bad merge</h1>
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3853">openshift/sippy#3853</a></dd>
+    <dt>Base</dt><dd><code class="inline">main</code></dd>
+    <dt>Head SHA</dt><dd><code class="inline">61a720f38cd9a65dad8d58a5a84099a6206808e9</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-30T17:14:13Z</dd>
+  </dl>
+</header>
+
+<section>
+  <h2>Verdict</h2>
+  <p><span class="verdict">Approve</span></p>
+  <p>
+    Small, well-scoped deletion of dead code that exactly restores state
+    accidentally undone by a bad rebase/merge resolution. Verified the diff
+    against the two prior commits it references — the narrative checks out
+    byte-for-byte. No behavioral risk, build and formatting are clean. One
+    non-blocking question worth asking the author before merging.
+  </p>
+</section>
+
+<section>
+  <h2>What this PR does</h2>
+  <ul>
+    <li>PR #3838 (TRT-2814) was rebased onto <code class="inline">main</code> after an earlier commit (<code class="inline">2a0a86e4</code>, TRT-2741) had already removed the unused <code class="inline">prow_ga_test_statuses_matview</code>.</li>
+    <li>The rebase/merge resolution went wrong: it resurrected the <code class="inline">prow_ga_test_statuses_matview</code> struct entry and <code class="inline">gaTestStatusMatView</code> SQL constant, while dropping the actually-intended removal of <code class="inline">payload_test_failures_14d_matview</code>.</li>
+    <li>This PR deletes the reintroduced dead struct entry and SQL constant from <code class="inline">pkg/db/views.go</code> (21 lines removed, 0 added, 1 file changed).</li>
+    <li>Net effect: restores the state both prior PRs intended, with no functional change to any live code path since the Component Readiness provider already reads <code class="inline">prow_ga_raw_test_data</code> directly.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Findings</h2>
+
+  <div class="finding question">
+    <h3><span class="badge question">Question</span>Possible orphaned matview on already-deployed databases</h3>
+    <p><code class="inline">pkg/db/views.go:71-119</code> (<code class="inline">syncPostgresMaterializedViews</code>)</p>
+    <pre>for _, pmv := range PostgresMatViews {
+    ...
+    dropSQL := fmt.Sprintf("DROP MATERIALIZED VIEW IF EXISTS %s CASCADE", pmv.Name)
+    schema := fmt.Sprintf("CREATE MATERIALIZED VIEW %s AS %s WITH NO DATA", pmv.Name, viewDef)
+    matViewUpdated, err := syncSchema(db, hashTypeMatView, pmv.Name, schema, dropSQL, false)</pre>
+    <p>
+      The sync loop only creates/updates matviews present in
+      <code class="inline">PostgresMatViews</code>; there's no path that drops
+      a matview once it's removed from the list. If the bad-merge state
+      (<code class="inline">e35dbaca6</code>) was ever deployed to a live
+      database, <code class="inline">prow_ga_test_statuses_matview</code>
+      would now exist as a real Postgres object with nothing left in code to
+      clean it up. This isn't introduced by this PR (the same gap existed for
+      the original <code class="inline">2a0a86e40</code> removal), but it's
+      worth confirming whether the bad-merge state reached a real environment
+      before this fix lands.
+    </p>
+  </div>
+</section>
+
+<section>
+  <h2>Things I checked and was fine with</h2>
+  <ul class="checklist">
+    <li><code class="inline">gofmt -l pkg/db/views.go</code> — clean.</li>
+    <li><code class="inline">go build ./pkg/db/...</code> — succeeds.</li>
+    <li>Diff is a pure deletion, byte-identical to what <code class="inline">2a0a86e40</code> removed; no unrelated changes.</li>
+    <li><code class="inline">git grep</code> across the repo finds zero remaining references to <code class="inline">gaTestStatusMatView</code> or <code class="inline">prow_ga_test_statuses_matview</code>.</li>
+    <li>CR provider already reads <code class="inline">prow_ga_raw_test_data</code> directly, so removing the matview has no behavioral impact on any live code path.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Did the bad-merge state (<code class="inline">e35dbaca6</code>) ever ship to a deployed database before this fix landed? If so, does <code class="inline">prow_ga_test_statuses_matview</code> need a manual <code class="inline">DROP MATERIALIZED VIEW</code> against that environment, since the code-level sync never drops matviews removed from the list?</li>
+  </ul>
+</section>
+
+</body>
+</html>
