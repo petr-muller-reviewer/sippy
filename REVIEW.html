@@ -94,9 +94,10 @@
     <dt>Title</dt><dd>TRT-2764: Resolved conflicts from #3721 - Fix search bar not completing search</dd>
     <dt>Head SHA</dt><dd><code class="inline">412fd3cede6cfd2686f1bbb1a38141288bdecbd5</code></dd>
     <dt>Base</dt><dd><code class="inline">main</code></dd>
-    <dt>Reviewed at</dt><dd>2026-07-25T12:26:40Z</dd>
+    <dt>Reviewed at</dt><dd>2026-07-30T13:35:36Z</dd>
     <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3818">github.com/openshift/sippy/pull/3818</a></dd>
   </dl>
+  <p><em>Refresh log:</em> 2026-07-30T13:35:36Z &mdash; no code changes (head SHA unchanged at <code class="inline">412fd3c</code>). Incorporated two new inline review comments from mstaeble plus their COMMENTED review.</p>
 </header>
 
 <h2>Verdict</h2>
@@ -112,7 +113,43 @@
   <li>Adds new tests: <code class="inline">GridToolbar.test.jsx</code> (search-field seeding + interaction behavior) and <code class="inline">JobRunsTable.test.jsx</code> (immutable-update pattern, tested via a standalone copy of the logic).</li>
 </ul>
 
+<h2>Since previous review</h2>
+<p>mstaeble left two inline review comments (2026-07-30) plus a COMMENTED review: one on <code class="inline">GridToolbar.jsx</code>'s new <code class="inline">useEffect</code> (excessive re-firing and failure to re-sync after the one-shot guard trips), one on <code class="inline">RegressedTestsPanel.jsx</code> (<code class="inline">clearSearch</code> pushes an empty <code class="inline">contains</code> filter instead of removing the filter item, affecting all 12 table components). No code changes (head SHA unchanged).</p>
+
 <h2>Findings</h2>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Should fix</span>GridToolbar useEffect fires every render and never re-syncs after first init</h3>
+  <p><code>sippy-ng/src/datagrid/GridToolbar.jsx:42-68</code></p>
+  <pre>const initializedFromFilter = useRef(false)
+useEffect(() => {
+  if (
+    initializedFromFilter.current ||
+    !props.searchField ||
+    !props.filterModel ||
+    !props.filterModel.items
+  ) {
+    return
+  }
+  ...
+  setSearch(filter.value)
+  initializedFromFilter.current = true
+}, [props.searchField, props.filterModel])</pre>
+  <p>Raised by mstaeble (review comment, 2026-07-30T13:11:21Z). <code class="inline">props.filterModel</code> is a new object reference on every render (per this PR's immutable-update pattern), so the effect body runs every render even though the <code class="inline">initializedFromFilter</code> ref guard bails out immediately &mdash; wasted work. More importantly, once the guard trips it never resets, so the search bar stops re-syncing from external filter changes (bookmark navigation, filter menu edits). Suggested fix: derive a primitive <code class="inline">filterSearchValue</code> from the filter model and depend the effect on that value instead of a one-shot ref, so the effect naturally deduplicates and stays reactive.</p>
+</div>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Nit</span>clearSearch pushes an empty contains filter instead of removing it (12 components)</h3>
+  <p><code>sippy-ng/src/component_readiness/RegressedTestsPanel.jsx:374</code> (same <code class="inline">clearSearch: () => requestSearch('')</code> pattern in all ~12 table components)</p>
+  <pre>// suggested:
+const newItems = filterModel.items.filter((f) => f.columnField !== 'name')
+if (searchValue) {
+  newItems.push({ id: 99, columnField: 'name', operatorValue: 'contains', value: searchValue })
+}
+setFilterModel({ ...filterModel, items: newItems })
+// call site: clearSearch: () => requestSearch(null)</pre>
+  <p>Raised by mstaeble (review comment, 2026-07-30T13:16:01Z; explicitly flagged non-blocking, fine as a follow-up). <code class="inline">clearSearch</code> calls <code class="inline">requestSearch('')</code>, pushing a <code class="inline">contains</code> filter with an empty value instead of removing it. Effects: vestigial filter visible in the filter popover ("name contains (empty)"), inflated filter badge count, a redundant <code class="inline">ILIKE '%%'</code> SQL clause sent to the API, and an unnecessary re-fetch. Pre-existing behavior, not introduced by this PR.</p>
+</div>
 
 <div class="finding should-fix">
   <h3><span class="badge should-fix">Should fix</span>Uneven test coverage across mechanically-identical components</h3>
@@ -153,7 +190,7 @@ if (existingFilter && existingFilter.value === searchValue) {
 <h2>Things I checked and was fine with</h2>
 <ul>
   <li>Immutable-update pattern applied consistently across all ~11 touched components — no leftover in-place mutation found anywhere in the diff.</li>
-  <li><code class="inline">GridToolbar.jsx</code>'s new <code class="inline">useEffect</code>: fires once (<code class="inline">initializedFromFilter</code> ref), requires exactly one matching filter for <code class="inline">searchField</code>, checks <code class="inline">operatorValue === 'contains'</code>, <code class="inline">not !== true</code>, truthy <code class="inline">value</code>. The <code class="inline">not</code> field matches the existing filter-model convention used in <code class="inline">GridToolbarFilterItem.jsx</code> / <code class="inline">GridToolbarFilterMenu.jsx</code> — not a new/invented schema.</li>
+  <li><code class="inline">GridToolbar.jsx</code>'s new <code class="inline">useEffect</code> guard logic: requires exactly one matching filter for <code class="inline">searchField</code>, checks <code class="inline">operatorValue === 'contains'</code>, <code class="inline">not !== true</code>, truthy <code class="inline">value</code>. The <code class="inline">not</code> field matches the existing filter-model convention used in <code class="inline">GridToolbarFilterItem.jsx</code> / <code class="inline">GridToolbarFilterMenu.jsx</code> — not a new/invented schema. (The <code class="inline">useRef</code>/one-shot-guard mechanism itself has issues — see should-fix finding above, raised by mstaeble.)</li>
   <li><code class="inline">ReleasePayloadJobRuns.jsx</code> field-name fix (<code class="inline">releaseTag</code> → <code class="inline">release_tag</code>): confirmed <code class="inline">release_tag</code> is the actual grid column field and used consistently elsewhere in the same file — the fix is correct.</li>
   <li>New <code class="inline">GridToolbar.test.jsx</code> covers all four population-guard branches (single positive match, negated filter, multiple filters for field, wrong operator) plus interaction behavior (Enter key, search button, no-op on blur, clear button).</li>
   <li>Removal of the <code class="inline">onBlur</code> handler is intentional — it avoids the redundant second search that caused the double-search/stuck-loading symptom described in the PR's preserved commit history.</li>
