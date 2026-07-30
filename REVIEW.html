@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3818</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border-left: 3px solid #ccc;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dt::after { content: ":"; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 {
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+    margin-top: 2.5rem;
+  }
+  .verdict {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.3em 0.8em;
+    border-radius: 6px;
+    background: #d4edda;
+    color: #155724;
+  }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin: 1rem 0;
+  }
+  .finding.blocking { border-left-color: #d33; }
+  .finding.should-fix { border-left-color: #e69500; }
+  .finding.nit { border-left-color: #888; }
+  .finding.question { border-left-color: #2b7de9; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1.05rem; }
+  .badge {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .badge.blocking { background: #d33; }
+  .badge.should-fix { background: #e69500; }
+  .badge.nit { background: #888; }
+  .badge.question { background: #2b7de9; }
+  ul { padding-left: 1.3rem; }
+  a { color: #2b7de9; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3818</h1>
+  <dl>
+    <dt>Title</dt><dd>TRT-2764: Resolved conflicts from #3721 - Fix search bar not completing search</dd>
+    <dt>Head SHA</dt><dd><code class="inline">412fd3cede6cfd2686f1bbb1a38141288bdecbd5</code></dd>
+    <dt>Base</dt><dd><code class="inline">main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-07-25T12:26:40Z</dd>
+    <dt>Link</dt><dd><a href="https://github.com/openshift/sippy/pull/3818">github.com/openshift/sippy/pull/3818</a></dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict">Approve</span></p>
+<p>Straightforward, correct fix for a real bug (stale object reference defeating React's re-render bail-out check on <code class="inline">setFilterModel</code>), applied consistently across all affected components, with solid new test coverage for the trickiest new logic (<code class="inline">GridToolbar</code>'s search-field seeding). Remaining points are minor coverage gaps and clarifying questions, not blockers.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Fixes toolbar search getting stuck in a loading spinner after pressing Enter: <code class="inline">requestSearch</code> in ~11 table components mutated <code class="inline">filterModel.items</code> in place and called <code class="inline">setFilterModel</code> with the same object reference, so React skipped the re-render. Now builds a new object (<code class="inline">{ ...filterModel, items: newItems }</code>).</li>
+  <li>Adds a <code class="inline">searchField</code> prop to <code class="inline">GridToolbar.jsx</code> plus a <code class="inline">useEffect</code> that repopulates the search box from an existing single positive <code class="inline">contains</code> filter, so refreshing a filtered URL shows the active search term.</li>
+  <li>Removes the <code class="inline">onBlur</code> handler on the search field that was triggering a redundant second search.</li>
+  <li>Fixes an unrelated <code class="inline">columnField</code> mismatch in <code class="inline">ReleasePayloadJobRuns.jsx</code> (<code class="inline">releaseTag</code> → <code class="inline">release_tag</code>) discovered during the rebase.</li>
+  <li>Adds new tests: <code class="inline">GridToolbar.test.jsx</code> (search-field seeding + interaction behavior) and <code class="inline">JobRunsTable.test.jsx</code> (immutable-update pattern, tested via a standalone copy of the logic).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Should fix</span>Uneven test coverage across mechanically-identical components</h3>
+  <p><code class="inline">sippy-ng/src/jobs/JobTable.jsx</code>, <code class="inline">FeatureGates.jsx</code>, <code class="inline">PayloadStreamsTable.jsx</code>, <code class="inline">ReleasePayloadTable.jsx</code>, <code class="inline">PayloadStreamTestFailures.jsx</code>, <code class="inline">PayloadTestFailures.jsx</code>, <code class="inline">ReleasePayloadPullRequests.jsx</code>, <code class="inline">RepositoriesTable.jsx</code></p>
+  <p>The same immutable-<code class="inline">requestSearch</code> fix was hand-applied to ~11 components but only <code class="inline">JobRunsTable.jsx</code> and <code class="inline">GridToolbar.jsx</code> got new tests. Risk is low since the pattern is mechanically identical and was spot-checked in this review, but a future edit to one of the untested components could regress silently.</p>
+</div>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Nit</span><code class="inline">JobRunsTable.test.jsx</code> tests a duplicated copy of the logic</h3>
+  <p><code>sippy-ng/src/jobs/JobRunsTable.test.jsx:1-20</code></p>
+  <pre>function requestSearch(filterModel, searchField, searchValue) {
+  const newItems = filterModel.items.filter(
+    (f) => f.columnField !== searchField
+  )
+  ...
+}</pre>
+  <p>The test defines its own standalone <code class="inline">requestSearch</code> ("We test the pure logic here because the full component requires extensive infrastructure") instead of exercising the real closure inside <code class="inline">JobRunsTable.jsx</code>. If the real function changes without the copy being updated, the test keeps passing while the component regresses.</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="badge question">Question</span>Why does <code class="inline">TestTable.jsx</code> get an extra dedup guard the others don't?</h3>
+  <p><code>sippy-ng/src/tests/TestTable.jsx:1013-1032</code></p>
+  <pre>const existingFilter = filterModel.items.find(
+  (f) => f.columnField === 'name' && f.operatorValue === 'contains'
+)
+if (existingFilter && existingFilter.value === searchValue) {
+  return
+}</pre>
+  <p><code class="inline">TestTable</code>'s <code class="inline">requestSearch</code> short-circuits (skips <code class="inline">setSearching(true)</code>/refetch) when the search value is unchanged; no other component in this PR has this guard. Is this <code class="inline">TestTable</code>-specific, or should the same protection be added elsewhere for consistency?</p>
+</div>
+
+<div class="finding question">
+  <h3><span class="badge question">Question</span>PR body test-plan checkboxes unchecked</h3>
+  <p>PR description</p>
+  <p>The "Validation" section claims ESLint 0 errors and Vitest 32/32 passing, but the "Test plan" checkboxes (<code class="inline">make lint</code>, <code class="inline">make test</code>, manual verification) are all unchecked. Likely unedited template boilerplate — worth confirming CI is green before merge.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Immutable-update pattern applied consistently across all ~11 touched components — no leftover in-place mutation found anywhere in the diff.</li>
+  <li><code class="inline">GridToolbar.jsx</code>'s new <code class="inline">useEffect</code>: fires once (<code class="inline">initializedFromFilter</code> ref), requires exactly one matching filter for <code class="inline">searchField</code>, checks <code class="inline">operatorValue === 'contains'</code>, <code class="inline">not !== true</code>, truthy <code class="inline">value</code>. The <code class="inline">not</code> field matches the existing filter-model convention used in <code class="inline">GridToolbarFilterItem.jsx</code> / <code class="inline">GridToolbarFilterMenu.jsx</code> — not a new/invented schema.</li>
+  <li><code class="inline">ReleasePayloadJobRuns.jsx</code> field-name fix (<code class="inline">releaseTag</code> → <code class="inline">release_tag</code>): confirmed <code class="inline">release_tag</code> is the actual grid column field and used consistently elsewhere in the same file — the fix is correct.</li>
+  <li>New <code class="inline">GridToolbar.test.jsx</code> covers all four population-guard branches (single positive match, negated filter, multiple filters for field, wrong operator) plus interaction behavior (Enter key, search button, no-op on blur, clear button).</li>
+  <li>Removal of the <code class="inline">onBlur</code> handler is intentional — it avoids the redundant second search that caused the double-search/stuck-loading symptom described in the PR's preserved commit history.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the <code class="inline">TestTable.jsx</code>-only dedup guard fixing a <code class="inline">TestTable</code>-specific bug, or should it be added to the other ~10 components for consistency?</li>
+  <li>Could <code class="inline">JobRunsTable.test.jsx</code> exercise the actual component closure (e.g. by extracting <code class="inline">requestSearch</code> to an exported/testable helper) instead of a hand-duplicated copy?</li>
+  <li>Can you confirm CI (<code class="inline">make lint</code>, <code class="inline">make test</code>) is actually green? The PR's own test-plan checkboxes are unchecked.</li>
+</ul>
+
+</body>
+</html>
