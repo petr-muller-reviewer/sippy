@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3832</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  code.loc {
+    background: #eee;
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table { border-collapse: collapse; }
+  header td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+  header td.k { color: #666; font-size: 0.9em; white-space: nowrap; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .verdict {
+    display: inline-block;
+    font-weight: 600;
+    padding: 0.3em 0.9em;
+    border-radius: 999px;
+    color: #fff;
+    background: #2e8b57;
+  }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.6rem 1rem;
+    margin: 1rem 0;
+    background: #fafafa;
+    border-radius: 0 6px 6px 0;
+  }
+  .finding.should-fix { border-color: #d9822b; }
+  .finding.nit { border-color: #6c757d; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .badge {
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .badge.should-fix { background: #d9822b; }
+  .badge.nit { background: #6c757d; }
+  ul { padding-left: 1.3rem; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3832</h1>
+  <div>TRT-2802: Replace git clone with GitHub API and COPY protocol in feature gate loader</div>
+  <table>
+    <tr><td class="k">PR</td><td><a href="https://github.com/openshift/sippy/pull/3832">openshift/sippy#3832</a></td></tr>
+    <tr><td class="k">Head SHA</td><td><code>2b29be4122947322a45689285f593c59eda0d4ad</code></td></tr>
+    <tr><td class="k">Base</td><td><code>main</code></td></tr>
+    <tr><td class="k">Reviewed at</td><td>2026-07-29T10:59:57Z</td></tr>
+  </table>
+</header>
+
+<div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:0.75rem 1rem;margin-bottom:1.5rem;font-size:0.92em;">
+  <strong>Refresh log:</strong> rebased from <code>7781b8389</code> &rarr; <code>2b29be412</code> (force-push onto newer <code>main</code>). No diff in <code>pkg/dataloader/featuregateloader/</code> between old and new SHA &mdash; <code>go.mod</code>/<code>go.sum</code> and <code>cmd/sippy/load.go</code> churn is unrelated rebase noise from other merged PRs. No new comments/reviews since last review; CI re-ran after rebase and passed. Findings unchanged.
+</div>
+
+<h2>Verdict</h2>
+<p><span class="verdict">Approve</span></p>
+<p>No blocking issues found. The filename-parsing regex, host allowlisting, and upsert semantics all correctly preserve prior behavior with good added unit test coverage. The should-fix items (a functional test for the new SQL path, documenting <code>GITHUB_TOKEN</code>, and reconsidering the ad hoc GitHub client vs. the existing rate-limit-aware one) are worth addressing but don't block merge.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces the <code>go-git</code> clone of <code>openshift/api</code> with GitHub Contents API calls per release branch, cutting fetch time from ~3m10s to ~7s for 9 branches.</li>
+  <li>Adds a host allowlist (<code>raw.githubusercontent.com</code>, <code>objects.githubusercontent.com</code>) before following any <code>download_url</code> returned by the GitHub API.</li>
+  <li>Switches the DB write path from GORM <code>CreateInBatches</code> to pgx COPY-into-temp-table plus a raw <code>INSERT ... ON CONFLICT</code> upsert, using the pre-existing <code>db.CopyToTempTable</code> helper.</li>
+  <li>Replaces the ad hoc filename-suffix-splitting logic with a single regex that reproduces the same behavior for both legacy and versioned feature-gate filenames.</li>
+  <li>Removes the <code>go-git</code> dependency and 16 transitive packages (~117k lines of vendored code).</li>
+</ul>
+<p><em>Since previous review:</em> PR was rebased onto current <code>main</code> (force-push). The feature-gate-loader diff itself is byte-identical to the previous review; only unrelated rebase noise moved. CI re-ran post-rebase and passed.</p>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Should fix</span>No functional test for the new COPY/upsert SQL path</h3>
+  <p><code class="loc">pkg/dataloader/featuregateloader/featuregateloader.go:228-277</code> (<code>upsertFeatureGates</code>)</p>
+  <p>This is new SQL (raw COPY + <code>INSERT ... ON CONFLICT</code>) that hasn't previously run in production. Project convention (see <code>releasesync_functional_test.go</code>) is a functional test that skips unless credentials/env vars are supplied, rather than relying only on manual staging verification.</p>
+  <pre>cleanup, err := db.CopyToTempTable(l.ctx, conn, "tmp_feature_gates", featureGates, featureGateTempCols)
+...
+upsertTag, err := conn.Exec(l.ctx, `
+    INSERT INTO feature_gates (release, topology, feature_set, feature_gate, status, created_at, updated_at)
+    SELECT release, topology, feature_set, feature_gate, status, NOW(), NOW()
+    FROM tmp_feature_gates
+    ON CONFLICT (release, topology, feature_set, feature_gate) DO UPDATE SET
+        status     = EXCLUDED.status,
+        updated_at = NOW()
+`)</pre>
+</div>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Should fix</span><code>GITHUB_TOKEN</code> env var undocumented</h3>
+  <p><code class="loc">pkg/dataloader/featuregateloader/featuregateloader.go:41-51</code> (<code>New</code>)</p>
+  <p>New optional env var affecting auth/rate limits for this loader. Project convention requires documenting new env vars in <code>config/README.md</code> or root <code>README.md</code> in the same PR; not present in this diff.</p>
+  <pre>githubToken:    os.Getenv("GITHUB_TOKEN"),</pre>
+</div>
+
+<div class="finding should-fix">
+  <h3><span class="badge should-fix">Should fix</span>New GitHub client duplicates and bypasses existing rate-limit-aware client</h3>
+  <p><code class="loc">pkg/dataloader/featuregateloader/featuregateloader.go:41-51,192-218</code> (<code>New</code>, <code>doGet</code>) vs <code class="loc">pkg/dataloader/prowloader/github/github.go</code></p>
+  <p><code>prowloader/github/github.go</code> already implements a GitHub client with GitHub App installation-token auth (preferred, via <code>newGHAuthClient</code>) falling back to <code>GITHUB_TOKEN</code>, plus explicit <code>RateLimits()</code> checking and <code>IsWithinRateLimitThreshold()</code> so callers can back off before hitting 403s. The new loader reimplements a bare <code>net/http.Client</code> that only reads <code>GITHUB_TOKEN</code> directly, has no rate-limit awareness, and no retry/backoff on non-200/404 responses &mdash; a 403 rate-limit response is just a generic error, and that release's fetch is silently dropped for the cycle. Both loaders share the same <code>GITHUB_TOKEN</code>/<code>api.github.com</code> quota with zero coordination: this loader's <code>listDirectory</code> calls (~9/cycle) add to a budget <code>prowloader</code> actively monitors, invisibly to it. This loader's own footprint is small enough to be low-risk on its own (<code>downloadFile</code> targets <code>raw.githubusercontent.com</code>, which isn't part of the <code>api.github.com</code> quota), but it's an avoidable duplication of already-solved infrastructure.</p>
+  <pre>githubToken:    os.Getenv("GITHUB_TOKEN"),
+...
+resp, err := l.httpClient.Do(req) //nolint:gosec
+...
+if resp.StatusCode == http.StatusNotFound {
+    return nil, fmt.Errorf("not found: %s", targetURL)
+}
+if resp.StatusCode != http.StatusOK {
+    return nil, fmt.Errorf("HTTP %s from %s", resp.Status, targetURL)
+}</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Nit</span><code>//nolint:gosec</code> lacks rationale comment</h3>
+  <p><code class="loc">pkg/dataloader/featuregateloader/featuregateloader.go:204</code></p>
+  <p><code>doGet</code> serves both the hardcoded listing URL and the allowlist-checked download URL. The G107 suppression is justified since <code>isAllowedDownloadURL</code> gates the download path, but a short comment would help future readers who see the shared helper in isolation.</p>
+  <pre>resp, err := l.httpClient.Do(req) //nolint:gosec</pre>
+</div>
+
+<div class="finding nit">
+  <h3><span class="badge nit">Nit</span>Legacy <code>token</code> auth scheme</h3>
+  <p><code class="loc">pkg/dataloader/featuregateloader/featuregateloader.go:200-202</code></p>
+  <p><code>"token "+l.githubToken</code> works for classic PATs; GitHub recommends <code>Bearer</code> for newer token types. Not a functional bug today.</p>
+  <pre>req.Header.Set("Authorization", "token "+l.githubToken)</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>parseFeatureGateFilename</code> regex reproduces old suffix-splitting behavior exactly for both legacy and versioned filenames; all pre-existing test cases pass unchanged.</li>
+  <li><code>isAllowedDownloadURL</code> correctly restricts <code>download_url</code> (untrusted API response value) to the two expected GitHub raw-content hosts over HTTPS; covered by tests including scheme rejection and malformed URLs.</li>
+  <li>The added <code>dbErr</code> guard before constructing the feature-gate loader in <code>load.go</code> matches the exact pattern used by every other loader branch in that function &mdash; not a bug.</li>
+  <li>Partial-failure handling: a failed release fetch is recorded and the loop continues; an all-failed case short-circuits the upsert on an empty slice while still surfacing errors.</li>
+  <li><code>fetchFeatureGatesForBranch</code> aborts on first error within a branch, discarding already-parsed files for that release &mdash; same as the old <code>filepath.Walk</code> behavior, not a regression.</li>
+  <li><code>db.CopyToTempTable</code> (pre-existing, untouched by this PR) validates identifiers via regex before use in raw SQL &mdash; no injection risk from the fixed column definitions.</li>
+  <li>Composite unique constraint / upsert semantics preserved from the old GORM <code>OnConflict</code> logic.</li>
+  <li>Storing <code>ctx context.Context</code> on the <code>FeatureGateLoader</code> struct is not an anti-pattern here: the shared <code>DataLoader</code> interface's <code>Load()</code> takes no arguments, so a constructor-injected context is this package's established convention (<code>gateststatus</code>, <code>testownershiploader</code> do the same). Each loader is built fresh per CLI invocation and used once &mdash; no staleness/reuse risk.</li>
+  <li>Rate-limit exposure from this loader's own request volume is low on its own: <code>listDirectory</code> is ~9 calls/cycle against the rate-limited <code>api.github.com</code>; <code>downloadFile</code> targets the separately-throttled <code>raw.githubusercontent.com</code>.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is a functional test (skipped without credentials) planned as a fast-follow for the COPY/upsert path, or intentionally out of scope here?</li>
+  <li>Should <code>GITHUB_TOKEN</code> be documented in <code>config/README.md</code>, or is it considered ops/deployment-only config?</li>
+  <li>Was reusing <code>prowloader/github.Client</code> (GitHub App auth + rate-limit checking) considered instead of a new bare HTTP client, given both now draw from the same <code>GITHUB_TOKEN</code>/<code>api.github.com</code> quota with no coordination?</li>
+</ul>
+
+</body>
+</html>
