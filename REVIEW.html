@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3849</title>
+<style>
+  :root {
+    color-scheme: light dark;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    color: #1c1c1e;
+    background: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e4e4e6; background: #16171a; }
+    .meta, .checked, .card { background: #202226 !important; border-color: #33353a !important; }
+    code, pre { background: #26282d !important; color: #e4e4e6 !important; }
+    a { color: #8ab4ff; }
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  .meta {
+    background: #f6f6f8;
+    border: 1px solid #e2e2e5;
+    border-radius: 8px;
+    padding: 0.9rem 1.2rem;
+    font-size: 0.92rem;
+    margin-bottom: 1.5rem;
+  }
+  .meta div { margin: 0.15rem 0; }
+  .meta code { background: none; padding: 0; }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    background: #f0f0f2;
+    border-radius: 4px;
+  }
+  code { padding: 0.1em 0.35em; font-size: 0.9em; }
+  pre {
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  .verdict {
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 0.8rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid;
+  }
+  .verdict.needs-discussion { background: #fff8e6; border-color: #e6c74a; color: #6b5300; }
+  @media (prefers-color-scheme: dark) {
+    .verdict.needs-discussion { background: #3a331a; border-color: #6b5300; color: #ffe9a8; }
+  }
+  .card {
+    border: 1px solid #e2e2e5;
+    border-radius: 8px;
+    padding: 0.9rem 1.2rem;
+    margin-bottom: 1.1rem;
+  }
+  .card h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #fbdada; color: #8a1f1f; }
+  .badge.should-fix { background: #ffe6c2; color: #7a4a00; }
+  .badge.nit { background: #e2e2fb; color: #33338a; }
+  .badge.question { background: #d8f0e6; color: #14603f; }
+  .loc { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.35rem; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy #3849</h1>
+<div class="meta">
+  <div><strong>Title:</strong> [WIP] TRT-2752: Add lifecycle as a dimension in summary tables</div>
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3849">github.com/openshift/sippy/pull/3849</a></div>
+  <div><strong>Head SHA:</strong> <code>a6737647e0a31484a34317cce246c01769149ca2</code></div>
+  <div><strong>Base branch:</strong> <code>main</code></div>
+  <div><strong>Reviewed at:</strong> 2026-07-30T17:25:22Z</div>
+</div>
+
+<h2>Verdict</h2>
+<p class="verdict needs-discussion">Needs discussion</p>
+<p>The core change &mdash; adding <code>lifecycle</code> as a key column and fixing every self-join on <code>test_cumulative_summaries</code> to avoid a Cartesian blow-up &mdash; is correct and well tested. It's marked <code>[WIP]</code>/<code>do-not-merge</code> for a reason, and there's one real open question worth resolving before merge: the Postgres component-readiness provider doesn't wire up the <code>Lifecycles</code> filter that BigQuery already supports, which may or may not be in scope for this PR.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a <code>lifecycle</code> (<code>blocking</code>/<code>informing</code>) column to <code>test_daily_totals</code> and <code>test_cumulative_summaries</code>, folded into both primary keys (migration <code>000011</code>).</li>
+  <li>Daily/cumulative aggregation now groups by lifecycle from <code>prow_job_run_tests.lifecycle</code>, instead of collapsing blocking and informing results into a single row.</li>
+  <li>Fixes every self-join on <code>test_cumulative_summaries</code> to also match on <code>lifecycle</code>, preventing the new row-per-lifecycle split from turning into a cross-product that inflates counts.</li>
+  <li>Adds an integration test reproducing exactly that inflation scenario and asserting correct counts.</li>
+  <li>Updates the AI chat tool's schema documentation and example queries to mention the new column.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+<div class="card">
+  <span class="badge should-fix">should-fix</span><strong>Postgres CR provider doesn't apply the existing <code>Lifecycles</code> filter</strong>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:210-242</code> (<code>queryTestStatusPrefixSum</code>)</div>
+  <p>BigQuery's provider already filters sample results by lifecycle via <code>reqOptions.Lifecycles</code> (<code>bigquery/querygenerators.go:497-503</code>: <code>AND COALESCE(NULLIF(lifecycle,''),'blocking') IN UNNEST(@Lifecycles)</code>). This PR gives Postgres everything needed to do the same &mdash; the lifecycle column, correctly joined &mdash; but never references <code>reqOptions.Lifecycles</code>; the final <code>GROUP BY</code> still combines blocking+informing into one total. A caller setting <code>testLifecycles</code> would get filtered results from BigQuery and unfiltered results from Postgres. CLAUDE.md requires BigQuery/Postgres parity for data-provider query changes &mdash; though given the <code>[WIP]</code> label this may be intentionally deferred rather than an oversight.</p>
+  <pre>FROM test_cumulative_summaries e
+LEFT JOIN test_cumulative_summaries s
+    ON s.release = e.release AND s.test_id = e.test_id
+    AND s.prow_job_id = e.prow_job_id AND s.suite_id = e.suite_id
+    AND s.lifecycle = e.lifecycle AND s.date = ?
+...
+GROUP BY e.test_id, e.suite_id, vg.group_id</pre>
+</div>
+
+<h3>Questions</h3>
+<div class="card">
+  <span class="badge question">question</span><strong>Primary key reorder on <code>test_cumulative_summaries</code> implies a full index rebuild</strong>
+  <div class="loc"><code>pkg/db/migrations/000011_add_lifecycle_to_summaries.up.sql:16-19</code></div>
+  <p>Beyond adding <code>lifecycle</code>, the migration reorders the PK from <code>(date, release, ...)</code> to <code>(release, date, ...)</code>, aligning with the table's <code>LIST by release, RANGE by date</code> partitioning &mdash; reasonable, but it means a full PK rebuild on what's likely one of the largest tables in the schema. Worth confirming the production rollout plan (locking/duration).</p>
+  <pre>ALTER TABLE test_cumulative_summaries
+    DROP CONSTRAINT IF EXISTS test_cumulative_summaries_pkey;
+ALTER TABLE test_cumulative_summaries
+    ADD PRIMARY KEY (release, date, test_id, prow_job_id, suite_id, lifecycle);</pre>
+</div>
+
+<h3>Nits</h3>
+<div class="card">
+  <span class="badge nit">nit</span><strong>PR description cites the wrong migration number</strong>
+  <div class="loc">PR description vs <code>pkg/db/migrations/000011_add_lifecycle_to_summaries.{up,down}.sql</code></div>
+  <p>Description says "migration 000010"; the actual files are <code>000011</code>, likely stale from before a rebase over the already-merged <code>000010_drop_test_analysis_by_job_by_dates</code>. Text only, code is correct.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>All self-joins on <code>test_cumulative_summaries</code> (<code>cr_queries.go</code>, <code>cumulative_query.go</code>, <code>feature_gates.go</code>, <code>test_queries.go</code> &times;3) got the <code>s.lifecycle = e.lifecycle</code> fix &mdash; swept the whole codebase for other usages.</li>
+  <li><code>UpdateDateForRelease</code> (<code>cumulative_summary.go</code>) correctly threads <code>lifecycle</code> through the <code>FULL OUTER JOIN</code> and the <code>COALESCE(prev.lifecycle, tds.lifecycle, 'blocking')</code> fallback.</li>
+  <li><code>pkg/api/test_analysis.go</code> (untouched) only <code>SUM()</code>s <code>test_daily_totals</code> without a self-join or lifecycle grouping, so the new row split just re-combines into the same totals as before &mdash; not a bug.</li>
+  <li><code>prow_job_run_tests.lifecycle</code> is <code>NOT NULL DEFAULT 'blocking'</code> (migration 000009), so the direct <code>pjrt.lifecycle</code> insert in <code>dailysummary.go</code> can't violate the new <code>NOT NULL</code> constraint on <code>test_daily_totals.lifecycle</code>.</li>
+  <li><code>up.sql</code>/<code>down.sql</code> are consistent: down restores the original unique index and PK column order.</li>
+  <li><code>gofmt -l</code> clean on all modified Go files.</li>
+  <li>New integration test directly targets the join-fix bug with clear before/after math in comments.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the missing <code>reqOptions.Lifecycles</code> filter in the Postgres CR provider intentional scope-narrowing for this PR, or a follow-up gap?</li>
+  <li>What's the planned rollout approach for the <code>test_cumulative_summaries</code> PK rebuild on production (table size, expected lock duration)?</li>
+  <li>Is this PR still blocked by the <code>do-not-merge/work-in-progress</code> label for a reason beyond what's visible in the diff?</li>
+</ul>
+
+</body>
+</html>
