@@ -227,7 +227,7 @@ func (p *PostgresProvider) queryTestStatusPrefixSum(
         LEFT JOIN test_cumulative_summaries s
             ON s.release = e.release AND s.test_id = e.test_id
             AND s.prow_job_id = e.prow_job_id AND s.suite_id = e.suite_id
-            AND s.date = ?
+            AND s.lifecycle = e.lifecycle AND s.date = ?
         JOIN prow_jobs pj ON pj.id = e.prow_job_id AND pj.deleted_at IS NULL
             AND pj.variant_combination_id IN (%s)
         JOIN (%s) AS vg(vcid, group_id) ON vg.vcid = pj.variant_combination_id`,

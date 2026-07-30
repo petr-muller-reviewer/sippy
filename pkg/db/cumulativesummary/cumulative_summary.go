@@ -132,7 +132,7 @@ func (s *pgStore) Releases() ([]string, error) {
 
 func (s *pgStore) UpdateDateForRelease(date civil.Date, release string) error {
 	return s.dbc.DB.Exec(`
-		INSERT INTO test_cumulative_summaries (date, test_id, prow_job_id, suite_id, release,
+		INSERT INTO test_cumulative_summaries (date, test_id, prow_job_id, suite_id, lifecycle, release,
 		                         prefix_sum_successes, prefix_sum_failures, prefix_sum_flakes, prefix_sum_runs,
 		                         prefix_max_last_failure, prefix_max_last_success)
 		SELECT
@@ -140,6 +140,7 @@ func (s *pgStore) UpdateDateForRelease(date civil.Date, release string) error {
 			COALESCE(prev.test_id, tds.test_id),
 			COALESCE(prev.prow_job_id, tds.prow_job_id),
 			COALESCE(prev.suite_id, tds.suite_id),
+			COALESCE(prev.lifecycle, tds.lifecycle, 'blocking'),
 			COALESCE(prev.release, tds.release),
 			COALESCE(prev.prefix_sum_successes, 0) + COALESCE(tds.successes, 0),
 			COALESCE(prev.prefix_sum_failures, 0) + COALESCE(tds.failures, 0),
@@ -152,7 +153,8 @@ func (s *pgStore) UpdateDateForRelease(date civil.Date, release string) error {
 			ON prev.test_id = tds.test_id
 			AND prev.prow_job_id = tds.prow_job_id
 			AND prev.suite_id = tds.suite_id
-		ON CONFLICT (date, release, test_id, prow_job_id, suite_id)
+			AND prev.lifecycle = tds.lifecycle
+		ON CONFLICT (date, release, test_id, prow_job_id, suite_id, lifecycle)
 		DO UPDATE SET
 			prefix_sum_successes = EXCLUDED.prefix_sum_successes,
 			prefix_sum_failures = EXCLUDED.prefix_sum_failures,

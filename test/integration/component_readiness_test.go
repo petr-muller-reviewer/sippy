@@ -78,12 +78,17 @@ func createTestOwnership(t *testing.T, dbc *db.DB, testID uint, suiteID *uint, u
 
 type cumulativeSummaryOpts struct {
 	prefixMaxLastFailure *time.Time
+	lifecycle            string
 }
 
 type cumulativeSummaryOption func(*cumulativeSummaryOpts)
 
 func withLastFailure(t time.Time) cumulativeSummaryOption {
 	return func(o *cumulativeSummaryOpts) { o.prefixMaxLastFailure = &t }
+}
+
+func withLifecycle(lifecycle string) cumulativeSummaryOption {
+	return func(o *cumulativeSummaryOpts) { o.lifecycle = lifecycle }
 }
 
 func createCumulativeSummary(t *testing.T, dbc *db.DB, date civil.Date, release string, testID, prowJobID, suiteID uint, runs, successes, flakes int64, options ...cumulativeSummaryOption) {
@@ -98,10 +103,14 @@ func createCumulativeSummary(t *testing.T, dbc *db.DB, date civil.Date, release 
 		TestID:               testID,
 		ProwJobID:            prowJobID,
 		SuiteID:              suiteID,
+		Lifecycle:            o.lifecycle,
 		PrefixSumRuns:        runs,
 		PrefixSumSuccesses:   successes,
 		PrefixSumFlakes:      flakes,
 		PrefixMaxLastFailure: o.prefixMaxLastFailure,
+	}
+	if tcs.Lifecycle == "" {
+		tcs.Lifecycle = "blocking"
 	}
 	require.NoError(t, dbc.DB.Create(&tcs).Error)
 }
@@ -2372,6 +2381,53 @@ func TestDrillDownBySecondaryCapability(t *testing.T) {
 		assert.NotEqual(t, "openshift-tests:pvc-only", ts.TestID,
 			"test with only PVC capability should not appear in IPv4 drill-down")
 	}
+}
+
+func TestMixedLifecycleRowsProduceCorrectCounts(t *testing.T) {
+	dbc := crTestDB(t)
+	release := "4.16"
+
+	vc := createVariantCombination(t, dbc, []string{"Platform:aws", "Network:ovn"})
+	job := createProwJobWithVC(t, dbc, "periodic-e2e-aws-lifecycle", release, vc)
+	test := createTest(t, dbc, "openshift-tests:[sig-storage] PVC lifecycle test")
+	suite := createSuite(t, dbc, "openshift-tests")
+	tow := createTestOwnership(t, dbc, test.ID, &suite.ID, "openshift-tests:lifecycle", "Storage", []string{"PersistentVolumes"})
+
+	startMinus1 := civil.Date{Year: 2024, Month: 5, Day: 31}
+	endMinus1 := civil.Date{Year: 2024, Month: 6, Day: 14}
+
+	// Blocking: runs=10, successes=8, flakes=1
+	createCumulativeSummary(t, dbc, startMinus1, release, test.ID, job.ID, suite.ID, 100, 90, 5, withLifecycle("blocking"))
+	createCumulativeSummary(t, dbc, endMinus1, release, test.ID, job.ID, suite.ID, 110, 98, 6, withLifecycle("blocking"))
+
+	// Informing: runs=20, successes=15, flakes=2
+	createCumulativeSummary(t, dbc, startMinus1, release, test.ID, job.ID, suite.ID, 50, 40, 3, withLifecycle("informing"))
+	createCumulativeSummary(t, dbc, endMinus1, release, test.ID, job.ID, suite.ID, 70, 55, 5, withLifecycle("informing"))
+
+	provider := postgres.NewPostgresProvider(dbc, nil)
+	opts := defaultReqOptions(release)
+	includeVariants := map[string][]string{
+		"Platform": {"aws"},
+		"Network":  {"ovn"},
+	}
+
+	result, errs := provider.QuerySampleTestStatus(context.Background(), opts, includeVariants,
+		opts.SampleRelease.Start, opts.SampleRelease.End)
+	require.Empty(t, errs)
+	require.NotEmpty(t, result)
+
+	key := crtest.KeyWithVariants{
+		TestID:   tow.UniqueID,
+		Variants: map[string]string{"Platform": "aws", "Network": "ovn"},
+	}
+	ts, ok := result[key.Encode()]
+	require.True(t, ok, "expected key %s in results", key.Encode())
+
+	// Correct: blocking (10) + informing (20) = 30 runs
+	// Without lifecycle join fix, cross-product would inflate to 40
+	assert.Equal(t, 30, ts.TotalCount)
+	assert.Equal(t, 23, ts.SuccessCount) // blocking 8 + informing 15
+	assert.Equal(t, 3, ts.FlakeCount)    // blocking 1 + informing 2
 }
 
 // --- Helpers ---

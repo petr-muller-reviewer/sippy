@@ -26,11 +26,12 @@ var valueColumns = []string{
 
 func buildInsertSQL(tableName, dateColumn string) string {
 	return fmt.Sprintf(`
-		INSERT INTO %s (test_id, prow_job_id, suite_id, release, %s, %s)
+		INSERT INTO %s (test_id, prow_job_id, suite_id, lifecycle, release, %s, %s)
 		SELECT
 			pjrt.test_id,
 			pjrt.prow_job_id,
 			COALESCE(pjrt.suite_id, 0),
+			pjrt.lifecycle,
 			pjrt.prow_job_run_release,
 			date(pjrt.prow_job_run_timestamp),
 			COUNT(*) FILTER (WHERE pjrt.status = 1),
@@ -45,7 +46,7 @@ func buildInsertSQL(tableName, dateColumn string) string {
 		WHERE pjrt.prow_job_run_timestamp >= ?::date
 		  AND pjrt.prow_job_run_timestamp < (?::date + INTERVAL '1 day')
 		  AND pjrt.prow_job_run_release = ?
-		GROUP BY pjrt.test_id, pjrt.prow_job_id, COALESCE(pjrt.suite_id, 0), pjrt.prow_job_run_release, date(pjrt.prow_job_run_timestamp)`,
+		GROUP BY pjrt.test_id, pjrt.prow_job_id, COALESCE(pjrt.suite_id, 0), pjrt.lifecycle, pjrt.prow_job_run_release, date(pjrt.prow_job_run_timestamp)`,
 		tableName, dateColumn, strings.Join(valueColumns, ", "))
 }
 
@@ -58,7 +59,7 @@ func buildOnConflictClause(tableName, dateColumn string) string {
 	}
 
 	return fmt.Sprintf(`
-		ON CONFLICT (test_id, prow_job_id, suite_id, release, %s)
+		ON CONFLICT (test_id, prow_job_id, suite_id, lifecycle, release, %s)
 		DO UPDATE SET %s
 		WHERE (%s) IS DISTINCT FROM (%s)`,
 		dateColumn,
