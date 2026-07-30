@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3854</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1c1e21;
+    max-width: 880px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fff;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: #f4f5f7;
+    border-radius: 4px;
+  }
+  code { padding: 0.1rem 0.35rem; font-size: 0.9em; }
+  pre {
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    border: 1px solid #e1e4e8;
+    font-size: 0.85em;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+    border-bottom: 2px solid #e1e4e8;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .meta { color: #57606a; font-size: 0.9em; margin-bottom: 1.5rem; }
+  .meta div { margin: 0.1rem 0; }
+  .verdict {
+    padding: 0.9rem 1.1rem;
+    border-radius: 6px;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .verdict.request-changes { background: #fff5f5; border: 1px solid #f5c2c7; color: #842029; }
+  .verdict.approve { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+  .verdict.needs-discussion { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .finding {
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left: 5px solid #cf222e; }
+  .finding.should-fix { border-left: 5px solid #bf8700; }
+  .finding.nit { border-left: 5px solid #57606a; }
+  .finding.question { border-left: 5px solid #0969da; }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 10px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.blocking { background: #ffebe9; color: #cf222e; }
+  .badge.should-fix { background: #fff8c5; color: #7d5b00; }
+  .badge.nit { background: #eef0f2; color: #57606a; }
+  .badge.question { background: #ddf4ff; color: #0969da; }
+  .loc { color: #57606a; font-size: 0.85em; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: TRT-2865: Add CI job to run the integration tests</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3854">openshift/sippy#3854</a></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Head SHA:</strong> <code>c9757f0718cc2a192f72db13b978a61b5b904300</code></div>
+  <div><strong>Reviewed at:</strong> 2026-07-30T23:15:50Z</div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict request-changes">Request changes</div>
+<p>The change itself is sound &mdash; correctly models Postgres template-DB semantics, preserves the existing testcontainers path as default, and mirrors the established <code>scripts/e2e.sh</code> pattern. The one thing to fix before merge is a documentation gap the project's own conventions call out explicitly: new env vars and Makefile targets should be reflected in <code>.apm/instructions/</code>. Everything else is a nit or a question for the author, not a blocker.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code>ConnectToExternalPostgres()</code> so <code>test/integration</code> can run against a Postgres instance provided via <code>SIPPY_INTEGRATION_DSN</code>, bypassing testcontainers-go (which needs a container runtime unavailable in CI test pods).</li>
+  <li>Fixes template-DB cleanup: unmarks <code>IS_TEMPLATE</code> before dropping, so the suite can be re-run repeatedly against the same Postgres instance without failing.</li>
+  <li>Adds <code>scripts/integration.sh</code>, modeled closely on the existing <code>scripts/e2e.sh</code>, handling devcontainer vs. bare-host setup and an early-exit fast path when the DSN is already provided by the caller.</li>
+  <li>Adds a <code>make ci-integration</code> target wrapping the new script.</li>
+  <li>Corresponding openshift/release CI wiring (Postgres sidecar + <code>SIPPY_INTEGRATION_DSN</code>) is described in the PR body as a follow-up, not part of this diff.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span><strong>Missing <code>.apm/instructions</code> update for new env var / Makefile target</strong>
+  <div class="loc"><code>.apm/instructions/dev-commands.instructions.md</code> (not touched by this PR)</div>
+  <p>The PR adds <code>SIPPY_INTEGRATION_DSN</code> and <code>make ci-integration</code>, but the repo's own convention (mirrored into <code>CLAUDE.md</code>/<code>AGENTS.md</code>) is that new env vars, CLI flags, and Makefile targets get documented in <code>.apm/instructions/</code>, with <code>make apm</code> re-run afterward. Currently that file only documents <code>make integration</code>.</p>
+  <pre>Run integration tests: `make integration`</pre>
+</div>
+
+<div class="finding question">
+  <span class="badge question">Question</span><strong>Template DB name collision if external Postgres is ever shared across concurrent runs</strong>
+  <div class="loc"><code>test/integration/util/testdb.go:129-140,151-192</code></div>
+  <p><code>createTemplateDB</code> uses a fixed name (<code>template_integration</code>) and drops/recreates it on every <code>TestMain</code> run. This is safe if the CI Postgres sidecar is one-per-job-pod, as the PR description implies, but would race if the external Postgres were ever shared across concurrent PR checks.</p>
+  <pre>_, _ = adminDB.Exec(fmt.Sprintf("ALTER DATABASE %s IS_TEMPLATE = false", templateDB))
+if _, err := adminDB.Exec(fmt.Sprintf("DROP DATABASE IF EXISTS %s", templateDB)); err != nil {</pre>
+</div>
+
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>Dead code path after <code>set -e</code> triggers</strong>
+  <div class="loc"><code>scripts/integration.sh:85-87</code></div>
+  <p><code>EXIT_CODE=$?</code> after the final <code>make integration</code> is unreachable when that command fails, since <code>set -e</code> exits the script immediately (the <code>EXIT</code> trap still captures the correct <code>$?</code> from the failing command via <code>ARG=$?</code>). Not a bug, just slightly misleading to read.</p>
+  <pre>make integration
+EXIT_CODE=$?</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>PostgresContainer.Terminate</code> nil-checks <code>container</code> correctly for the external-Postgres path; no nil-deref risk.</li>
+  <li><code>ALTER DATABASE ... IS_TEMPLATE = false</code> before <code>DROP DATABASE</code> correctly models real Postgres semantics; errors from the ALTER are intentionally swallowed since the DB may not exist yet on a fresh instance.</li>
+  <li><code>scripts/integration.sh</code>'s caller-provided-DSN fast path bypasses devcontainer/host detection and calls <code>make integration</code> directly &mdash; correct for the CI sidecar case.</li>
+  <li><code>gofmt -l</code> on both changed Go files reports no issues.</li>
+  <li>Unquoted shell variables (<code>$DOCKER</code>, <code>$PSQL_CONTAINER</code>, <code>$PSQL_PORT</code>) match the existing style in <code>scripts/e2e.sh</code> &mdash; consistent with convention, not a regression.</li>
+  <li><code>podman stop -i</code> / <code>podman rm -i</code> is a legitimate podman flag (<code>--ignore</code>), used the same way in <code>scripts/e2e.sh</code>.</li>
+  <li>Test coverage: PR description states all 133 integration tests pass against both testcontainers and external-Postgres paths, plus the full unit suite &mdash; consistent with the project's "don't mock storage clients" convention, since the external-Postgres path can't reasonably be unit tested without a real DB.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the CI Postgres sidecar guaranteed to be one-per-job-pod, or could it ever be a shared/long-lived instance across concurrent PR checks? That changes whether the fixed <code>template_integration</code> name is safe.</li>
+  <li>Should <code>scripts/e2e.sh</code> adopt the same DSN password-masking (<code>${DSN%%@*}@***</code>) added here in <code>scripts/integration.sh</code>, for consistency in CI logs?</li>
+</ul>
+
+</body>
+</html>
