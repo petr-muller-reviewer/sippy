@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: PR #3714 - TRT-2762: Component Readiness variant filter inflation</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 0; background: #f5f5f5; }
+  .container { max-width: 900px; margin: 0 auto; padding: 24px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  h1 { font-size: 1.4rem; margin-top: 0; }
+  h2 { font-size: 1.1rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; margin-top: 32px; }
+  h3 { font-size: 1rem; margin-top: 20px; margin-bottom: 4px; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.85em; background: #f0f0f0; border-radius: 3px; }
+  code { padding: 1px 4px; }
+  pre { padding: 12px; overflow-x: auto; border-left: 3px solid #ccc; margin: 8px 0; }
+  .meta { background: #f8f8f8; border: 1px solid #e0e0e0; border-radius: 4px; padding: 12px 16px; margin-bottom: 24px; font-size: 0.875rem; }
+  .meta table { border-collapse: collapse; width: 100%; }
+  .meta td { padding: 2px 8px 2px 0; vertical-align: top; }
+  .meta td:first-child { font-weight: 600; white-space: nowrap; color: #555; }
+  .verdict-box { border-left: 4px solid; border-radius: 4px; padding: 12px 16px; margin: 16px 0; }
+  .verdict-approve { border-color: #22863a; background: #f2fff5; }
+  .verdict-label { font-weight: 700; font-size: 1rem; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 6px; padding: 14px 16px; margin: 12px 0; }
+  .finding-blocking { border-left: 4px solid #d73a49; }
+  .finding-should-fix { border-left: 4px solid #e36209; }
+  .finding-nit { border-left: 4px solid #6f42c1; }
+  .finding-question { border-left: 4px solid #0366d6; }
+  .finding-resolved { border-left: 4px solid #22863a; background: #f8fff9; }
+  .finding-title { font-weight: 600; margin-bottom: 6px; }
+  .finding-location { font-size: 0.8rem; color: #555; margin-bottom: 8px; }
+  .severity-badge { display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 1px 6px; border-radius: 3px; margin-right: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .badge-blocking { background: #ffeef0; color: #d73a49; }
+  .badge-should-fix { background: #fff8e1; color: #e36209; }
+  .badge-nit { background: #f5f0ff; color: #6f42c1; }
+  .badge-question { background: #f1f8ff; color: #0366d6; }
+  .badge-resolved { background: #dcffe4; color: #22863a; }
+  .hl { background: #fffbdd; }
+  .refresh-note { background: #f1f8ff; border: 1px solid #c8e1ff; border-radius: 4px; padding: 10px 14px; margin-bottom: 20px; font-size: 0.875rem; }
+  ul { margin: 8px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  a { color: #0366d6; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="meta">
+    <table>
+      <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3714">openshift/sippy#3714</a></td></tr>
+      <tr><td>Title</td><td>TRT-2762: Component Readiness: adding variant filter inflates regression count with unrelated results</td></tr>
+      <tr><td>Author</td><td>app/openshift-trt-agent (bot)</td></tr>
+      <tr><td>Head SHA</td><td><code>3a24e874bd6ce705a434982175d64a538dd2dcd2</code></td></tr>
+      <tr><td>Base</td><td>main</td></tr>
+      <tr><td>Reviewed at</td><td>2026-07-25T13:06:27Z</td></tr>
+      <tr><td>Changed files</td><td>3 (+61 / -8) at first review; grew with follow-up commits (see refresh note)</td></tr>
+    </table>
+  </div>
+
+  <h1>Review: PR #3714</h1>
+
+  <div class="refresh-note">
+    <strong>Refreshed</strong> from <code>54c1db77b</code> &rarr; <code>3a24e874b</code>.
+    Commit <code>652b348ee</code> ("Address review feedback on variant filter fix") resolved both
+    open findings from the previous review (stale test_filters state, and a related
+    array/object state-type bug) in response to an independent <code>/deep-review</code> panel
+    plus this review. It also added unit tests for <code>hasCapabilityIntersection</code> and a
+    godoc comment. Two further commits raised then reverted the npm audit level in the
+    <code>Makefile</code> (net no-op, per a human reviewer's inline request). Verdict upgraded
+    from <em>request changes</em> to <em>approve</em>.
+  </div>
+
+  <h2>Verdict</h2>
+  <div class="verdict-box verdict-approve">
+    <div class="verdict-label">APPROVE</div>
+    <p style="margin:8px 0 0">
+      Both original bug fixes are correct. The two issues raised in the first review round
+      (stale <code>test_filters</code> state on view switch, and the
+      <code>compareVariantsCheckedItems</code> array/object mismatch) were fixed in
+      <code>652b348ee</code>, going further than requested by switching to React's functional
+      updater form and adding unit tests. The one remaining open item &mdash; the Postgres
+      provider's missing lifecycle filter &mdash; is real but confirmed low-severity: production
+      traffic uses <code>MixedProvider</code>, which routes test-status queries to BigQuery, not
+      Postgres, so this gap only affects the standalone dev/devcontainer/CI-seed path. Worth a
+      follow-up ticket, not a merge blocker.
+    </p>
+  </div>
+
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Fixes a React state mutation bug in <code>replaceIncludeVariantsCheckedItems</code> and <code>replaceCompareVariantsCheckedItems</code>: both were mutating the existing state object and calling the setter with the same reference, making the change invisible to React. Fixed with spread-into-new-object, later upgraded to the functional updater form.</li>
+    <li>Fixes <code>updateVarsFromView()</code> to sync <code>test_filters.lifecycles</code> and <code>test_filters.capabilities</code> from a selected view's config into React state (previously only <code>variant_options</code> and <code>advanced_options</code> were synced).</li>
+    <li>Adds Go-level capability filtering to the Postgres data provider's <code>queryTestStatus</code>, bringing it into parity with the pre-existing BigQuery SQL-level filtering.</li>
+    <li>Adds an Azure seed job and two test entries to the seed data, providing a job that is excluded from the default view, making variant-filter behavior testable end-to-end with seed data.</li>
+  </ul>
+
+  <p><strong>Since previous review:</strong></p>
+  <ul>
+    <li>An independent <code>/deep-review</code> panel (7 specialist lenses) reviewed the PR and reached materially the same conclusions as this review, plus a few additional low-severity suggestions (stale closures, missing godoc, missing unit tests).</li>
+    <li>Author addressed all actionable panel feedback in <code>652b348ee</code>, resolving both findings this review had raised.</li>
+    <li>A human reviewer (<code>stbenjam</code>) requested reverting an unrelated Makefile change; author complied in <code>3a24e874b</code>.</li>
+  </ul>
+
+  <h2>Findings</h2>
+
+  <h3 style="color:#0366d6">Question (downgraded from Blocking)</h3>
+
+  <div class="finding finding-question">
+    <div class="finding-title"><span class="severity-badge badge-question">question</span>Postgres backend does not implement lifecycle filtering</div>
+    <div class="finding-location"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:349-503</code></div>
+    <p>
+      <code>reqOptions.Lifecycles</code> is never passed to <code>queryTestStatus</code>; there is no SQL
+      predicate for it, unlike BigQuery's
+      <code>COALESCE(NULLIF(lifecycle, ''), 'blocking') IN UNNEST(@Lifecycles)</code>.
+      Originally flagged as blocking in the first review. Downgraded after verifying production wiring:
+      <code>cmd/sippy/serve.go</code> builds a <code>MixedProvider</code> when BigQuery credentials are
+      configured (the production case), and <code>MixedProvider</code> routes
+      <code>QueryBaseTestStatus</code>/<code>QuerySampleTestStatus</code> to BigQuery, not Postgres
+      (<code>pkg/api/componentreadiness/dataprovider/mixed/provider.go:55-61</code>). The pure-Postgres
+      <code>queryTestStatus</code> path is only reached via <code>--data-provider=postgres</code>, which in
+      practice means local dev/devcontainer/CI-seed, not production.
+    </p>
+    <p>
+      The independent <code>/deep-review</code> panel reached the same conclusion independently
+      ("pre-existing, not introduced by this PR, Postgres provider is for local dev/testing only")
+      and the author declined to fix it in this PR &mdash; a reasonable scope call. Still worth a
+      tracking issue since the gap is real and would matter if <code>--data-provider=postgres</code>
+      is ever run against production-scale data.
+    </p>
+  </div>
+
+  <h2>Resolved since previous review (in <code>652b348ee</code>)</h2>
+
+  <div class="finding finding-resolved">
+    <div class="finding-title"><span class="severity-badge badge-resolved">fixed</span>Stale lifecycle/capability state when switching to a view without <code>test_filters</code></div>
+    <div class="finding-location"><code>sippy-ng/src/component_readiness/CompReadyVars.jsx:432-443</code></div>
+    <p>
+      Added explicit <code>else setTestLifecycles([])</code> / <code>else setTestCapabilities([])</code>
+      branches, plus an outer <code>else</code> clearing both when <code>view.test_filters</code> is
+      absent entirely. Also switched guards from truthy checks to <code>Object.hasOwn(...)</code>,
+      closing the related style-consistency question from the first review.
+    </p>
+    <pre>if (view.test_filters) {
+  if (Object.hasOwn(view.test_filters, 'lifecycles'))
+    setTestLifecycles(view.test_filters.lifecycles)
+  else setTestLifecycles([])
+  if (Object.hasOwn(view.test_filters, 'capabilities'))
+    setTestCapabilities(view.test_filters.capabilities)
+  else setTestCapabilities([])
+} else {
+  setTestLifecycles([])
+  setTestCapabilities([])
+}</pre>
+  </div>
+
+  <div class="finding finding-resolved">
+    <div class="finding-title"><span class="severity-badge badge-resolved">fixed</span><code>compareVariantsCheckedItems</code> array/object type mismatch (bonus fix)</div>
+    <div class="finding-location"><code>sippy-ng/src/component_readiness/CompReadyVars.jsx:190-207</code></div>
+    <p>
+      <code>useState([])</code> changed to <code>useState({})</code>; both replace functions switched to
+      React's functional updater form
+      (<code>setX((prev) =&gt; ({...prev, [variant]: checkedItems}))</code>), eliminating a theoretical
+      stale-closure race the first review didn't flag but the independent panel did.
+    </p>
+  </div>
+
+  <h3 style="color:#6f42c1">Nits</h3>
+
+  <div class="finding finding-nit">
+    <div class="finding-title"><span class="severity-badge badge-nit">nit</span><code>map[string]bool</code> hand-rolled set violates project coding standard &mdash; not addressed</div>
+    <div class="finding-location"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:97-107, 370-376</code></div>
+    <p>
+      Still present as originally reported. CLAUDE.md states: <em>"Use
+      <code>k8s.io/apimachinery/pkg/util/sets</code> (e.g. <code>sets.NewString()</code>). Do not use
+      <code>map[string]bool</code> as a hand-rolled set."</em> This wasn't raised by the independent
+      panel either, and <code>hasCapabilityIntersection</code> now has a godoc comment and table-driven
+      unit tests in <code>provider_test.go</code>, so the code is otherwise clean. Leaving as a non-blocking
+      style nit.
+    </p>
+    <pre>// current
+capSet := make(map[string]bool, len(capabilities))
+for _, c := range capabilities {
+    capSet[c] = true
+}
+// ...
+if len(capSet) > 0 && !hasCapabilityIntersection(row.Capabilities, capSet) {
+
+// preferred
+capSet := sets.NewString(capabilities...)
+// ...
+if capSet.Len() > 0 && !capSet.HasAny(row.Capabilities...) {</pre>
+  </div>
+
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li>The spread-into-new-object fix (now functional-updater form) for <code>replaceIncludeVariantsCheckedItems</code> and <code>replaceCompareVariantsCheckedItems</code> is correct.</li>
+    <li>BigQuery already had capability filtering pre-PR (via <code>UNNEST(@Capabilities)</code> in SQL). This PR brings Postgres into parity; there is no BigQuery-side gap for capabilities.</li>
+    <li><code>reqOptions.Capabilities</code> is correctly threaded to both <code>QueryBaseTestStatus</code> and <code>QuerySampleTestStatus</code> callers.</li>
+    <li>Azure seed job (<code>Platform:azure</code>) is correctly excluded from the default view, providing a meaningful test for variant filtering in seed data.</li>
+    <li><code>hasCapabilityIntersection</code> now has table-driven unit tests in <code>provider_test.go</code> (6 cases: match, no-match, empty test caps, empty requested caps, multi-overlap, nil test caps).</li>
+    <li>Production wiring confirmed: <code>cmd/sippy/serve.go</code> builds <code>MixedProvider</code> when BigQuery is configured; <code>MixedProvider</code> routes test-status queries to BigQuery, not Postgres &mdash; confirms the lifecycle-filter gap only affects the standalone <code>--data-provider=postgres</code> path.</li>
+    <li>Makefile churn (audit-level raised in <code>50e51aef9</code>, reverted in <code>3a24e874b</code>) is a net no-op, done at a human reviewer's request.</li>
+    <li><code>ci/prow/lint</code> is currently failing on HEAD, but the author's comment confirms it reproduces on <code>main</code> independent of this PR (a react-router npm audit advisory with no patch yet available) &mdash; not a regression introduced by this PR.</li>
+  </ul>
+
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Any plan to file a tracking ticket for the Postgres-provider lifecycle-filter gap, or is <code>--data-provider=postgres</code> considered permanently dev-only and out of scope for that fix?</li>
+  </ul>
+
+</div>
+</body>
+</html>
