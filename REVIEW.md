@@ -1,52 +1,46 @@
 ---
 pr: openshift/sippy#3850
 title: "Add ODF lp-interop variant and CR view for OCP 4.22"
-head_sha: 8a8430eca697eb5c90619b860c1513cd3bb418a4
+head_sha: cdfb7b8729ff23a6026e80b01f4b3cb365b6725b
 base: main
-reviewed_at: 2026-07-30T17:44:06Z
+reviewed_at: 2026-07-31T10:30:42Z
 verdict: request-changes
 ---
 
 ## What this PR does
 
-- Adds `{"-lpga-lp-interop-cr--odf--", "lp-interop--odf--lpGA"}` to `layeredProductPatterns` in `pkg/variantregistry/ocp.go` (`setLayeredProduct`), classifying ODF lp-interop CR jobs.
-- Adds a `TestVariantSyncer` case in `pkg/variantregistry/ocp_test.go` for job `periodic-ci-red-hat-storage-ocs-ci-master-odf-ocp-4.22-lpGA-lp-interop-cr--odf--aws`.
+- Adds `{"-lpga-lp-interop-cr--", "lp-interop--odf--lpGA"}` to `layeredProductPatterns` in `pkg/variantregistry/ocp.go` (`setLayeredProduct`), classifying ODF lp-interop CR jobs.
+- Adds a `TestVariantSyncer` case in `pkg/variantregistry/ocp_test.go` for job `periodic-ci-red-hat-storage-ocs-ci-master-odf-ocp-4.22-lpGA-lp-interop-cr--aws`.
 - Adds a new Component Readiness view `4.22-LP-Interop--lpGA` in `config/views.yaml`.
+- Follow-up commit (`cdfb7b872`) since the last review round narrowed the match pattern from `-lpga-lp-interop-cr--odf--` to `-lpga-lp-interop-cr--` and updated the test job name to match, tracking a renamed upstream CR job (companion `openshift/release#82653`).
 
 ## Findings
 
-### [blocking] New view's include_variants won't scope to the new LayeredProduct value, and will likely return zero rows
-- where: `config/views.yaml:1792-1834` (new `4.22-LP-Interop--lpGA` view), compare `config/views.yaml:1736-1790` (`4.22-LP-OCP-Compat--lpGA`)
-- concern: `4.22-LP-OCP-Compat--lpGA` explicitly enumerates its LP-GA layered products under `include_variants.LayeredProduct` (e.g. `lp-ocp-compat--odf--lpGA`, `lp-ocp-compat--virt--lpGA`, ...) plus `Owner: [lp]`. The new `4.22-LP-Interop--lpGA` view instead has `include_variants.LayeredProduct: []` (empty) and filters only on `Owner: [mpiit]` + `Network: [ovn]`. Since `Owner: mpiit` is set generically for any job matching `-lp-interop-` (`pkg/variantregistry/ocp.go:558`), this new view is byte-for-byte identical (apart from `name:`) to the pre-existing `4.22-LP-Interop--lpMainline` view — the new `lp-interop--odf--lpGA` variant value introduced by this PR is never used to scope it. Worse, an empty `include_variants` value is not a no-op filter in the query builder: `BuildComponentReportQuery` (`pkg/api/componentreadiness/dataprovider/bigquery/querygenerators.go:470-478`) emits `AND (jv_LayeredProduct.variant_value in UNNEST(@variantGroup_LayeredProduct))` bound to an empty array, which is always false in BigQuery — so the view would return zero rows. The Postgres provider has the same gap: `matchesIncludeVariants` (`pkg/api/componentreadiness/dataprovider/postgres/provider.go:85-95`) does `slices.Contains(allowed, val)` with no `len(allowed)==0` guard. Contrast with `adjustJobTierBasedOnView` (`pkg/variantregistry/ocp.go:398-401`), which explicitly treats an empty allowed-list as "no filter" — that intent exists elsewhere in the codebase but not in the query-building path. This exact `LayeredProduct: []` pattern already exists in `4.20-LP-Interop`, `4.21-LP-Interop`, and `4.22-LP-Interop--lpMainline`, so it may be a pre-existing/latent issue rather than new — but this PR adds a 4th instance and its own (unchecked) test-plan item "View renders correctly in Sippy CR dashboard" is exactly the check that would surface it.
-- excerpt: |
-    - name: 4.22-LP-Interop--lpGA
-      ...
-      include_variants:
-        LayeredProduct: []
-        Network:
-        - ovn
-        Owner:
-        - mpiit
-- suggested fix: populate `include_variants.LayeredProduct` with the actual GA value(s), e.g. `["lp-interop--odf--lpGA"]`, mirroring `4.22-LP-OCP-Compat--lpGA`.
-
-### [nit] Trailing-dash inconsistency in new pattern
+### [blocking] New pattern matches any lp-interop CR job but hardcodes the ODF label
 - where: `pkg/variantregistry/ocp.go:1371`
-- concern: new pattern is `-lpga-lp-interop-cr--odf--` (double trailing dash) while the analogous compat pattern is `-lpga-lp-ocp-compat-cr--odf-` (single trailing dash, `pkg/variantregistry/ocp.go:1364`). Matches the given test job name (`...--odf--aws`), so not necessarily wrong, but worth confirming it won't miss ODF interop jobs whose name only has a single dash after `odf`.
+- concern: the pattern was changed from `-lpga-lp-interop-cr--odf--` to `-lpga-lp-interop-cr--`, dropping the product discriminator entirely, while the mapped value is still hardcoded to `lp-interop--odf--lpGA`. Any current or future `-lpga-lp-interop-cr--<other-product>...` job will be misclassified as ODF. Compare the OCP-Compat family in the same list, where every `-lpga-lp-ocp-compat-cr--<product>-` pattern explicitly encodes the product it maps to (e.g. `-lpga-lp-ocp-compat-cr--odf-`, `-lpga-lp-ocp-compat-cr--quay-`). This looks like an overcorrection of the previous review's trailing-dash nit — the fix should restore a product-scoped substring (e.g. `-lpga-lp-interop-cr--odf-`) rather than remove the product entirely, unless the actual renamed upstream job name genuinely dropped its product segment (worth confirming against `openshift/release#82653`).
 - excerpt: |
-    {"-lpga-lp-ocp-compat-cr--odf-", "lp-ocp-compat--odf--lpGA"},   // single trailing dash
-    {"-lpga-lp-interop-cr--odf--", "lp-interop--odf--lpGA"},        // double trailing dash
+    {"-lpga-lp-ocp-compat-cr--odf-", "lp-ocp-compat--odf--lpGA"},   // product-scoped
+    {"-lpga-lp-interop-cr--", "lp-interop--odf--lpGA"},             // not scoped, but hardcoded to ODF
 
-### [question] No lpMainline counterpart pattern added
-- where: `pkg/variantregistry/ocp.go:1371`, `config/views.yaml:1645` (existing `4.22-LP-Interop--lpMainline` view)
-- concern: only a `-lpga-...` pattern is added for ODF interop; there's no `-lpmainline-lp-interop-cr--odf--` pattern, unlike the OCP-Compat family which has both lpMainline and lpGA ACS patterns. Presumably intentional since the companion `openshift/release#82653` PR only defines a GA job today, but flagging in case a Mainline ODF interop job is expected later.
+### [blocking] New view's include_variants won't scope to the new LayeredProduct value, and will likely return zero rows
+- where: `config/views.yaml` (new `4.22-LP-Interop--lpGA` view), compare `4.22-LP-OCP-Compat--lpGA` in the same file
+- concern: `4.22-LP-OCP-Compat--lpGA` explicitly enumerates its LP-GA layered products under `include_variants.LayeredProduct`. The new `4.22-LP-Interop--lpGA` view instead has `include_variants.LayeredProduct: []` (empty) and filters only on `Owner: [mpiit]` + `Network: [ovn]` — identical to the pre-existing `4.22-LP-Interop--lpMainline` view apart from the release window. An empty `include_variants` entry is not a no-op filter: `BuildComponentReportQuery` (`pkg/api/componentreadiness/dataprovider/bigquery/querygenerators.go:474-479`) emits `AND (jv_LayeredProduct.variant_value in UNNEST(@variantGroup_LayeredProduct))` bound to an empty array, always false in BigQuery. The Postgres provider has the same gap: `matchesIncludeVariants` (`pkg/api/componentreadiness/dataprovider/postgres/provider.go:85-95`) does `slices.Contains(allowed, val)` with no `len(allowed)==0` guard. This exact pattern exists in `4.20-LP-Interop`, `4.21-LP-Interop`, and `4.22-LP-Interop--lpMainline` already, so may be latent/pre-existing, but this PR adds a 4th instance and its own unchecked test-plan item "View renders correctly in Sippy CR dashboard" is exactly the check that would surface it.
+- excerpt: |
+    include_variants:
+      LayeredProduct: []
+      Network:
+      - ovn
+      Owner:
+      - mpiit
+- suggested fix: populate `include_variants.LayeredProduct` with the actual GA value, e.g. `["lp-interop--odf--lpGA"]`.
 
 ## Checked
-- `TestVariantSyncer` new case: all expected variant values traced through the relevant setter functions (`setLayeredProduct`, `setJobTier` default-to-candidate, `Owner` via `-lp-interop-` substring match) and are consistent with existing logic.
+- `TestVariantSyncer` new case: expected variant values traced through `setLayeredProduct`, `setJobTier` (defaults to candidate), `Owner` (`-lp-interop-` substring match) — consistent with existing logic, and consistent with the renamed test job name after the follow-up commit.
 - Pattern placement in `layeredProductPatterns` list does not collide with earlier/later entries for the given test job name.
 - No README/API doc updates required — `config/views.yaml` isn't documented in a README; not an API or CLI flag change.
-- CI checks (build, lint, security, verify, yaml-lint) passing at time of review; unit/e2e pending.
 - `gofmt` formatting looks consistent with surrounding code.
 
 ## Open questions
-- Have you manually loaded this view in a running Sippy instance to confirm it renders data (per the unchecked "View renders correctly in Sippy CR dashboard" test-plan item)? Given the `include_variants.LayeredProduct: []` analysis above, I'd expect it to render empty.
-- Is the double-trailing-dash in the new pattern (`--odf--`) deliberate, or should it match the single-dash convention used by the compat pattern?
+- Is the renamed CR job name (`-lp-interop-cr--` with no product segment) actually shared across multiple layered products in `openshift/release#82653`, or was `odf` simply dropped by mistake when fixing the trailing-dash nit?
+- Have you manually loaded `4.22-LP-Interop--lpGA` in a running Sippy instance to confirm it renders data? Given the `include_variants.LayeredProduct: []` analysis above, I'd expect it to render empty.
