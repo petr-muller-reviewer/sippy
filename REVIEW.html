@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3850</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f4f4f4;
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid #e0e0e0;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table { border-collapse: collapse; }
+  header td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+  header td.k { color: #666; font-weight: 600; white-space: nowrap; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.3rem; }
+  h2 {
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+  }
+  .verdict {
+    display: inline-block;
+    font-weight: 700;
+    padding: 0.3rem 0.8rem;
+    border-radius: 6px;
+    margin-bottom: 0.8rem;
+  }
+  .verdict.request-changes { background: #ffe3e3; color: #a11; }
+  .verdict.approve { background: #e3ffe6; color: #17701a; }
+  .verdict.needs-discussion { background: #fff6d6; color: #8a6d00; }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1.1rem;
+  }
+  .finding.blocking { border-left-color: #c0392b; }
+  .finding.should-fix { border-left-color: #d68910; }
+  .finding.nit { border-left-color: #7f8c8d; }
+  .finding.question { border-left-color: #2e86c1; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1.05rem; }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    color: #fff;
+  }
+  .badge.blocking { background: #c0392b; }
+  .badge.should-fix { background: #d68910; }
+  .badge.nit { background: #7f8c8d; }
+  .badge.question { background: #2e86c1; }
+  .loc { color: #555; }
+  ul { padding-left: 1.3rem; }
+  .hl { background: #fff2a8; }
+  a { color: #1a5fb4; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3850</h1>
+  <table>
+    <tr><td class="k">Title</td><td>Add ODF lp-interop variant and CR view for OCP 4.22</td></tr>
+    <tr><td class="k">PR</td><td><a href="https://github.com/openshift/sippy/pull/3850">github.com/openshift/sippy/pull/3850</a></td></tr>
+    <tr><td class="k">Head SHA</td><td><code class="inline">8a8430eca697eb5c90619b860c1513cd3bb418a4</code></td></tr>
+    <tr><td class="k">Base branch</td><td><code class="inline">main</code></td></tr>
+    <tr><td class="k">Reviewed at</td><td>2026-07-30T17:44:06Z</td></tr>
+  </table>
+</header>
+
+<section>
+  <span class="verdict request-changes">REQUEST CHANGES</span>
+  <p>Small, low-risk change to the variant classifier and a test case are fine, but the new <code class="inline">4.22-LP-Interop--lpGA</code> view is configured in a way that (a) doesn't actually distinguish itself from the existing <code class="inline">--lpMainline</code> view, and (b) based on tracing the query-building code, likely returns zero rows entirely. I'd want the author to confirm the view renders data before merging, or fix the <code class="inline">include_variants</code> filter.</p>
+</section>
+
+<section>
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Adds <code class="inline">{"-lpga-lp-interop-cr--odf--", "lp-interop--odf--lpGA"}</code> to <code class="inline">layeredProductPatterns</code> in <code class="inline">pkg/variantregistry/ocp.go</code> (<code class="inline">setLayeredProduct</code>), classifying ODF lp-interop CR jobs.</li>
+    <li>Adds a <code class="inline">TestVariantSyncer</code> case in <code class="inline">pkg/variantregistry/ocp_test.go</code> for job <code class="inline">periodic-ci-red-hat-storage-ocs-ci-master-odf-ocp-4.22-lpGA-lp-interop-cr--odf--aws</code>.</li>
+    <li>Adds a new Component Readiness view <code class="inline">4.22-LP-Interop--lpGA</code> in <code class="inline">config/views.yaml</code>.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Findings</h2>
+
+  <div class="finding blocking">
+    <h3><span class="badge blocking">Blocking</span>New view's include_variants won't scope to the new LayeredProduct value, and will likely return zero rows</h3>
+    <p class="loc"><code class="inline">config/views.yaml:1792-1834</code> (new view) vs <code class="inline">config/views.yaml:1736-1790</code> (<code class="inline">4.22-LP-OCP-Compat--lpGA</code>)</p>
+    <p><code class="inline">4.22-LP-OCP-Compat--lpGA</code> explicitly enumerates its LP-GA layered products under <code class="inline">include_variants.LayeredProduct</code> (e.g. <code class="inline">lp-ocp-compat--odf--lpGA</code>, <code class="inline">lp-ocp-compat--virt--lpGA</code>, ...) plus <code class="inline">Owner: [lp]</code>. The new <code class="inline">4.22-LP-Interop--lpGA</code> view instead has <span class="hl"><code class="inline">include_variants.LayeredProduct: []</code></span> (empty) and filters only on <code class="inline">Owner: [mpiit]</code> + <code class="inline">Network: [ovn]</code>.</p>
+    <p>Since <code class="inline">Owner: mpiit</code> is set generically for any job matching <code class="inline">-lp-interop-</code> (<code class="inline">pkg/variantregistry/ocp.go:558</code>), this new view is byte-for-byte identical (apart from <code class="inline">name:</code>) to the pre-existing <code class="inline">4.22-LP-Interop--lpMainline</code> view. The new <code class="inline">lp-interop--odf--lpGA</code> variant value introduced by this PR is never actually used to scope it.</p>
+    <p>Worse, an empty <code class="inline">include_variants</code> value is <strong>not</strong> a no-op filter in the query builder: <code class="inline">BuildComponentReportQuery</code> (<code class="inline">pkg/api/componentreadiness/dataprovider/bigquery/querygenerators.go:470-478</code>) emits</p>
+    <pre>AND (jv_LayeredProduct.variant_value in UNNEST(@variantGroup_LayeredProduct))</pre>
+    <p>bound to an empty array — always false in BigQuery, so the query returns zero rows. The Postgres provider has the same gap: <code class="inline">matchesIncludeVariants</code> (<code class="inline">pkg/api/componentreadiness/dataprovider/postgres/provider.go:85-95</code>) does <code class="inline">slices.Contains(allowed, val)</code> with no <code class="inline">len(allowed)==0</code> guard. Contrast with <code class="inline">adjustJobTierBasedOnView</code> (<code class="inline">pkg/variantregistry/ocp.go:398-401</code>), which explicitly treats an empty allowed-list as "no filter" — that intent exists elsewhere in the codebase but not in the query-building path.</p>
+    <p>This exact <code class="inline">LayeredProduct: []</code> pattern already exists in <code class="inline">4.20-LP-Interop</code>, <code class="inline">4.21-LP-Interop</code>, and <code class="inline">4.22-LP-Interop--lpMainline</code>, so it may be pre-existing/latent rather than new to this PR — but this PR adds a 4th instance, and its own (unchecked) test-plan item "View renders correctly in Sippy CR dashboard" is exactly the check that would surface this.</p>
+    <pre>- name: 4.22-LP-Interop--lpGA
+  ...
+  include_variants:
+    LayeredProduct: []
+    Network:
+    - ovn
+    Owner:
+    - mpiit</pre>
+    <p><strong>Suggested fix:</strong> populate <code class="inline">include_variants.LayeredProduct</code> with the actual GA value(s), e.g. <code class="inline">["lp-interop--odf--lpGA"]</code>, mirroring <code class="inline">4.22-LP-OCP-Compat--lpGA</code>.</p>
+  </div>
+
+  <div class="finding nit">
+    <h3><span class="badge nit">Nit</span>Trailing-dash inconsistency in new pattern</h3>
+    <p class="loc"><code class="inline">pkg/variantregistry/ocp.go:1371</code></p>
+    <p>New pattern is <code class="inline">-lpga-lp-interop-cr--odf--</code> (double trailing dash) while the analogous compat pattern is <code class="inline">-lpga-lp-ocp-compat-cr--odf-</code> (single trailing dash, line 1364). Matches the given test job name (<code class="inline">...--odf--aws</code>), so not necessarily wrong, but worth confirming it won't miss ODF interop jobs whose name only has a single dash after <code class="inline">odf</code>.</p>
+    <pre>{"-lpga-lp-ocp-compat-cr--odf-", "lp-ocp-compat--odf--lpGA"},   // single trailing dash
+{"-lpga-lp-interop-cr--odf--", "lp-interop--odf--lpGA"},        // double trailing dash</pre>
+  </div>
+
+  <div class="finding question">
+    <h3><span class="badge question">Question</span>No lpMainline counterpart pattern added</h3>
+    <p class="loc"><code class="inline">pkg/variantregistry/ocp.go:1371</code>, <code class="inline">config/views.yaml:1645</code></p>
+    <p>Only a <code class="inline">-lpga-...</code> pattern is added for ODF interop; there's no <code class="inline">-lpmainline-lp-interop-cr--odf--</code> pattern, unlike the OCP-Compat family which has both lpMainline and lpGA ACS patterns. Presumably intentional since the companion <code class="inline">openshift/release#82653</code> PR only defines a GA job today, but flagging in case a Mainline ODF interop job is expected later.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li><code class="inline">TestVariantSyncer</code> new case: all expected variant values traced through the relevant setter functions (<code class="inline">setLayeredProduct</code>, <code class="inline">setJobTier</code> default-to-candidate, <code class="inline">Owner</code> via <code class="inline">-lp-interop-</code> substring match) and are consistent with existing logic.</li>
+    <li>Pattern placement in <code class="inline">layeredProductPatterns</code> list does not collide with earlier/later entries for the given test job name.</li>
+    <li>No README/API doc updates required — <code class="inline">config/views.yaml</code> isn't documented in a README; not an API or CLI flag change.</li>
+    <li>CI checks (build, lint, security, verify, yaml-lint) passing at time of review; unit/e2e pending.</li>
+    <li><code class="inline">gofmt</code> formatting looks consistent with surrounding code.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Have you manually loaded this view in a running Sippy instance to confirm it renders data (per the unchecked "View renders correctly in Sippy CR dashboard" test-plan item)? Given the <code class="inline">include_variants.LayeredProduct: []</code> analysis above, I'd expect it to render empty.</li>
+    <li>Is the double-trailing-dash in the new pattern (<code class="inline">--odf--</code>) deliberate, or should it match the single-dash convention used by the compat pattern?</li>
+  </ul>
+</section>
+
+</body>
+</html>
