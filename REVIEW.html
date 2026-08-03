@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3859</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  code, pre {
+    font-family: "SF Mono", Consolas, Monaco, monospace;
+    font-size: 0.9em;
+    background: #f4f4f4;
+    border-radius: 4px;
+  }
+  code { padding: 0.1em 0.35em; }
+  pre {
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    border-left: 3px solid #ccc;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .meta {
+    color: #555;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  .meta div { margin: 0.15rem 0; }
+  .verdict {
+    display: inline-block;
+    padding: 0.3em 0.8em;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .verdict.approve { background: #dcf5e0; color: #16642c; }
+  .finding {
+    margin-bottom: 1.4rem;
+    padding: 0.9rem 1.1rem;
+    border-radius: 6px;
+    border: 1px solid #e0e0e0;
+  }
+  .finding.blocking { border-left: 4px solid #d13438; }
+  .finding.should-fix { border-left: 4px solid #d99a00; }
+  .finding.nit { border-left: 4px solid #888; }
+  .finding.question { border-left: 4px solid #3178c6; }
+  .tag {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+    color: #666;
+  }
+  .loc { color: #555; font-size: 0.85rem; }
+  ul { padding-left: 1.3rem; }
+  a { color: #3178c6; }
+</style>
+</head>
+<body>
+
+<h1>Review of openshift/sippy#3859</h1>
+<div class="meta">
+  <div><strong>Title:</strong> TRT-2836: Add integration tests for payload query functions</div>
+  <div><strong>Head SHA:</strong> <code>a017b4ded2329385a15ecad02eceb80571fb6399</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-03T20:29:36Z</div>
+  <div><a href="https://github.com/openshift/sippy/pull/3859">View PR on GitHub</a></div>
+</div>
+
+<h2>Verdict</h2>
+<p><span class="verdict approve">APPROVE</span></p>
+<p>Test-only PR that adds thorough, correct integration coverage for the payload query functions. I verified the trickier boundary-condition assertions (inclusive vs. exclusive comparisons against <code>reportEnd</code>, the 14-day window behavior) directly against the SQL and they all check out. Only issue is a small amount of dead fixture code, which is a should-fix, not a blocker.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds 53 integration tests covering all 11 functions in <code>pkg/db/query/payload_queries.go</code>, no production code touched.</li>
+  <li>Fills a real gap: 8 new tests for <code>GetTestFailuresForPayloadStream</code>, previously untested (6-table join, array aggregation, 14-day window).</li>
+  <li>Explicitly tests boundary semantics (<code>&lt;</code> vs <code>&lt;=</code> against <code>reportEnd</code>) across several functions, and documents where a function has no upper bound at all rather than assuming a bug.</li>
+  <li>Extends <code>test/integration/util/fixtures.go</code> with a functional-options pattern for building test fixtures without breaking existing call sites.</li>
+  <li>CI is fully green (lint, unit, e2e, build, verify, security).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+<div class="finding should-fix">
+  <div class="tag">should-fix</div>
+  <h3>Unused fixture options added</h3>
+  <div class="loc"><code>test/integration/util/fixtures.go:129-135</code></div>
+  <pre>func WithPreviousReleaseTag(prev string) ReleaseTagOption {
+	return func(rt *models.ReleaseTag) { rt.PreviousReleaseTag = prev }
+}
+
+func WithForced(forced bool) ReleaseTagOption {
+	return func(rt *models.ReleaseTag) { rt.Forced = forced }
+}</pre>
+  <p><code>WithPreviousReleaseTag</code> and <code>WithForced</code> are added but never used anywhere in this PR or the rest of the repo. Given the PR's goal is exhaustive coverage of existing functions, this looks like dead code &mdash; either drop them, or (more likely intended) use <code>WithPreviousReleaseTag</code> in the <code>GetPreviousPayload</code> tests.</p>
+</div>
+
+<h3>Nits</h3>
+<div class="finding nit">
+  <div class="tag">nit</div>
+  <h3>Inconsistent constructor style</h3>
+  <div class="loc"><code>test/integration/util/fixtures.go:1408-1420</code> (CreateReleaseJobRun)</div>
+  <p><code>CreateProwJobRun</code>, <code>CreateReleaseTag</code>, and <code>CreateReleasePullRequest</code> all gained a variadic <code>...Option</code> parameter in this PR, but <code>CreateReleaseJobRun</code> still takes everything positionally. Not a functional problem given its current single call-site pattern, just an inconsistency worth noting for future edits.</p>
+</div>
+
+<h3>Questions</h3>
+<div class="finding question">
+  <div class="tag">question</div>
+  <h3>No "nonexistent payload" empty-result case for GetTestFailuresFor*</h3>
+  <p><code>TestGetTestFailuresForPayload_NoFailures</code> covers an existing payload with no job runs, but there's no test for a payload tag/release combo that doesn't exist at all. Probably a non-issue (the SQL naturally returns empty), but worth a quick confirmation it was a deliberate omission.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>No DB client mocking &mdash; tests run against real Postgres via testcontainers-go (<code>intutil.NewTestDB</code>), per project convention.</li>
+  <li>Table-driven test used for <code>GetLastPayloadStatus</code> phase-streak cases, consistent with existing repo patterns.</li>
+  <li>Functional-options pattern for fixture builders is idiomatic Go and doesn't break existing call sites.</li>
+  <li>Boundary conditions verified line-by-line against <code>payload_queries.go</code>:
+    <ul>
+      <li><code>GetLastAcceptedByArchitectureAndStream</code>, <code>GetPayloadStreamPhaseCounts</code>, <code>GetPayloadAcceptanceStatistics</code>: exclusive <code>release_time &lt; reportEnd</code>, tests assert exclusion at the exact boundary &mdash; correct.</li>
+      <li><code>GetLastPayloadStatus</code>: inclusive <code>release_time &lt;= reportEnd</code>, test asserts inclusion &mdash; correct.</li>
+      <li><code>GetLastPayloadTags</code>: genuinely has no upper bound; test comment documents this rather than assuming a bug &mdash; correct.</li>
+    </ul>
+  </li>
+  <li>Gap-math in the acceptance-statistics test (2h/3h/6h gaps &rarr; min/mean/max in seconds) checked out against actual time arithmetic.</li>
+  <li>CI fully green across lint, unit, e2e, build, verify, security.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Should <code>WithPreviousReleaseTag</code> / <code>WithForced</code> be dropped, or is there a follow-up test intended to exercise them?</li>
+</ul>
+
+</body>
+</html>
