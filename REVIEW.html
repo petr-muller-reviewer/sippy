@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3828</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    color: #1c1c1c;
+    background: #fdfdfd;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e6e6; background: #1a1a1a; }
+    .card { background: #242424 !important; border-color: #3a3a3a !important; }
+    code, pre { background: #2d2d2d !important; color: #f0f0f0 !important; }
+    a { color: #7cb8ff !important; }
+    .meta { color: #aaa !important; }
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: #f0f0f0;
+    border-radius: 4px;
+  }
+  code { padding: 0.1em 0.35em; font-size: 0.9em; }
+  pre { padding: 0.8rem 1rem; overflow-x: auto; font-size: 0.85em; }
+  .meta { color: #555; font-size: 0.92rem; }
+  .meta div { margin: 0.15rem 0; }
+  .card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+    background: #fafafa;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.6em;
+    border-radius: 999px;
+    margin-right: 0.5em;
+  }
+  .blocking { background: #ffdcdc; color: #8a0000; }
+  .should-fix { background: #ffe9c2; color: #8a4b00; }
+  .nit { background: #dfe8ff; color: #1a3a8a; }
+  .question { background: #e6e6e6; color: #333; }
+  @media (prefers-color-scheme: dark) {
+    .blocking { background: #4a1414; color: #ff9c9c; }
+    .should-fix { background: #4a3610; color: #ffcf85; }
+    .nit { background: #1c2c4a; color: #a9c2ff; }
+    .question { background: #333; color: #ccc; }
+  }
+  .verdict-line { font-size: 1.1rem; font-weight: 600; }
+  ul { padding-left: 1.3rem; }
+  .filepath { font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3828</h1>
+<div class="meta">
+  <div><strong>Title:</strong> TRT-2814: Eliminate prow_job_runs_report_matview</div>
+  <div><strong>Head SHA:</strong> <code>7cdc7cb15292280a1f1d41e229583dea85226b7f</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-07-31T15:45:17Z</div>
+  <div><strong>Link:</strong> <a href="https://github.com/openshift/sippy/pull/3828">github.com/openshift/sippy/pull/3828</a></div>
+</div>
+
+<div class="card">
+  <strong>Refresh log:</strong> No code change (head still <code>7cdc7cb15</code>). Title dropped the <code>[WIP]</code> prefix and the <code>do-not-merge/work-in-progress</code> label was removed, resolving the prior open question about it. CodeRabbit resolved its comment thread and approved (2026-07-31T15:28:26Z). Required e2e test run, scheduled by the merge-bot, passed (2026-07-31T15:37:17Z).
+</div>
+
+<h2>Verdict</h2>
+<p class="verdict-line">Approve.</p>
+<p>Well-executed, thoroughly tested elimination of a materialized view, bundled with a genuinely valuable ILIKE-escaping correctness/security fix applied consistently across all call sites. No blocking issues found. One should-fix (a stale reference to the dropped matview in an unrelated chat tool file) and a couple of process/operational questions worth confirming with the author before merge.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces <code>prow_job_runs_report_matview</code> (~90s refresh) with a two-phase live query in <code>JobsRunsReportFromDB</code> (<code>pkg/api/job_runs.go</code>): phase 1 paginates <code>prow_job_runs</code> JOIN <code>prow_jobs</code> with conditional PR joins; phase 2 enriches the returned page (test-name arrays, PR data, annotations) concurrently via <code>errgroup</code>.</li>
+  <li><code>test_failures</code>/<code>test_flakes</code> read directly from stored columns on <code>prow_job_runs</code> (populated at insert time by the prow loader, TRT-2834) instead of a runtime CTE.</li>
+  <li>Refactors <code>pkg/filter</code>: exports <code>FilterItemToSQL</code>/<code>FilterFieldToSQL</code> replacing unexported <code>orFilterToSQL</code>/<code>andFilterToSQL</code>; <code>Filter.ToSQL</code> now uses <code>FilterFieldToSQL</code> uniformly for AND and OR link operators.</li>
+  <li>Consolidates ILIKE wildcard escaping into exported <code>filter.EscapeLikeMetachars</code>, applied at all 12 ILIKE-pattern-construction sites — fixes previously-unescaped <code>%</code>/<code>_</code> in user filter values acting as SQL wildcards.</li>
+  <li>Adds a 1387-line integration test suite (<code>test/integration/job_runs_report_test.go</code>): pagination (incl. tied-sort-key and no-sort determinism), all filter operators/dispatch paths, sorting, test-name EXISTS-subquery filters, PR/annotation enrichment, multi-PR dedup, unsortable-field rejection.</li>
+  <li>Adds <code>sortable: false</code> to hidden test-name array columns in the frontend, paired with a backend <code>ValidationError</code> for unsortable sort fields.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="card">
+  <h3><span class="badge nit">nit</span><code>FilterItemToSQL</code> OperatorIsEmpty is not array-aware</h3>
+  <div class="meta"><span class="filepath">pkg/filter/filterable.go:771-776</span> (new <code>FilterItemToSQL</code>, <code>OperatorIsEmpty</code>/<code>OperatorIsNotEmpty</code> cases)</div>
+  <p>Unlike <code>FilterFieldToSQL</code>'s <code>isEmptyFilter</code> (which special-cases arrays with <code>IS NULL OR ARRAY_LENGTH(...) = 0</code>), <code>FilterItemToSQL</code> emits a plain <code>"%s IS NULL"</code>/<code>"%s IS NOT NULL"</code>. Documented as intentional in the doc comment ("no type-aware transformations... use FilterFieldToSQL when the column may be an array"). None of the current <code>columnAliases</code> callers are array-typed, so it's not a live bug &mdash; but a future caller adding an array-typed alias and using <code>isEmpty</code>/<code>isNotEmpty</code> would silently get wrong results.</p>
+  <pre>case OperatorIsEmpty:
+    sql = fmt.Sprintf("%s IS NULL", column)
+case OperatorIsNotEmpty:
+    sql = fmt.Sprintf("%s IS NOT NULL", column)</pre>
+</div>
+
+<div class="card">
+  <h3><span class="badge should-fix">should-fix</span>Stale reference to dropped matview in chat/AI-agent tool</h3>
+  <div class="meta"><span class="filepath">chat/sippy_agent/tools/database_query.py</span> (not touched by this PR)</div>
+  <p>This file documents <code>prow_job_runs_report_matview</code> as a queryable table for the sippy-chat natural-language DB tool and includes an example query against it. Confirmed by repo-wide grep this is the only remaining reference outside files this PR already updates. Once merged, the chat tool will generate SQL against a nonexistent table. Project convention (CLAUDE.md) is docs/code in the same PR &mdash; this is arguably in-scope.</p>
+  <pre>* **`prow_job_runs_report_matview`**: Pre-joined and aggregated data about job runs. Excellent for job pass/fail rates.</pre>
+</div>
+
+<div class="card">
+  <h3><span class="badge question">question</span>Has the test_failures/test_flakes backfill run against production?</h3>
+  <div class="meta">Operational / cross-PR dependency on TRT-2834 (already merged per repo history)</div>
+  <p><code>test_failures</code>/<code>test_flakes</code> are now read directly from stored columns rather than computed live. The loader populates them at insert time going forward; pre-existing rows need a one-time backfill. If it hasn't run against production, job runs older than the backfill would show zero failures/flakes after this ships &mdash; a visible regression from the matview's live-computed values. Staging verification numbers in the PR description look real and non-zero, suggesting staging is backfilled; production status is unconfirmed from the diff alone.</p>
+</div>
+
+<div class="card">
+  <h3><span class="badge question">question</span><code>%q</code>-based identifier quoting reachable from job-runs filters</h3>
+  <div class="meta"><span class="filepath">pkg/filter/filterable.go</span> (<code>FilterFieldToSQL</code>), reached via <span class="filepath">pkg/api/job_runs.go</span> (<code>applyJobRunFilters</code> fallback branch)</div>
+  <p><code>field := fmt.Sprintf("%q", f.Field)</code> quotes a client-supplied filter field name using Go string-escaping, not SQL identifier-escaping. Pre-existing pattern, not introduced here, but now also reachable from the new job-runs filter path for any field not in <code>columnAliases</code> (e.g. <code>cluster</code>, <code>labels</code>, <code>url</code>). Worth confirming <code>f.Field</code> is allowlist-validated upstream before reaching this point.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>NOT/HasEntry semantics: old <code>field IS NULL OR ? != ALL(field)</code> vs new <code>NOT(? = ANY(COALESCE(field,'{}')))</code> &mdash; verified equivalent for NULL and non-NULL cases; covered by new <code>TestListFilteredJobIDs</code> cases.</li>
+  <li>IsEmpty/IsNotEmpty NOT-wrapping in the <code>FilterFieldToSQL</code> path &mdash; truth table matches the old <code>optNot(!f.Not)</code> logic in <code>orFilterToSQL</code>, just expressed differently.</li>
+  <li>Duplicate-row fix for multi-PR-linked runs: <code>DISTINCT ON(prow_job_run_id) ... ORDER BY prow_job_run_id, prow_pull_request_id DESC</code> deterministically dedups, used consistently in both <code>addPRJoin</code> and <code>enrichJobRunsWithPRData</code>.</li>
+  <li>Pagination determinism: <code>q.Order("prow_job_runs.id DESC")</code> always appended after the user's sort field (GORM accumulates <code>.Order()</code> calls), acting as a tiebreaker. Exercised by <code>TestJobRunsReport_PaginationStableWithTiedSortKey</code> and <code>TestJobRunsReport_PaginationDeterministicWithoutSort</code>.</li>
+  <li>Conditional PR join wiring: joined pre-COUNT only when needed for filtering, post-COUNT when only needed for sorting; enrichment skips re-fetching PR data when already selected inline.</li>
+  <li>Concurrency safety of the 3 parallel <code>errgroup</code> enrichment functions writing disjoint struct fields of the same slice &mdash; safe under the Go memory model, no lock needed.</li>
+  <li>ILIKE-escaping fix applied consistently across all sites; all SQL parameterized via <code>?</code> placeholders in both GORM <code>.Where()</code> and raw <code>.Raw()</code>/<code>.Exec()</code> calls; no string-interpolated user filter values found.</li>
+  <li><code>sets.New[string]()</code> used per project convention; <code>gofmt</code>-clean; <code>//nolint:gosec</code> usage consistent with existing codebase patterns.</li>
+  <li>Deleted <code>Test_BenchmarkJobRunsReportMatview</code> and the matview definition/registration are consistent &mdash; no other in-repo Go/SQL references to the dropped matview.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Has the test_failures/test_flakes backfill script been run against production (not just staging)?</li>
+  <li>Any plan to update <code>chat/sippy_agent/tools/database_query.py</code> in this PR or as a fast-follow?</li>
+  <li>Is <code>f.Field</code> guaranteed to be allowlist-validated before reaching the <code>%q</code>-quoted fallback path, for fields not covered by <code>columnAliases</code>?</li>
+</ul>
+
+<h2>Resolved since previous pass</h2>
+<ul>
+  <li><strong>"Is the do-not-merge/work-in-progress label still accurate?"</strong> &mdash; resolved: label removed and <code>[WIP]</code> dropped from title. CodeRabbit independently resolved its comment thread and approved. Required e2e CI run passed.</li>
+</ul>
+
+</body>
+</html>
