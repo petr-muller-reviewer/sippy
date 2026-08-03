@@ -4,232 +4,187 @@
 <meta charset="UTF-8">
 <title>Review: openshift/sippy#3847</title>
 <style>
-  :root {
-    --bg: #ffffff;
-    --fg: #1a1a1a;
-    --muted: #666666;
-    --border: #e0e0e0;
-    --code-bg: #f5f5f7;
-    --blocking: #b3261e;
-    --blocking-bg: #fdecea;
-    --should-fix: #915600;
-    --should-fix-bg: #fff4e0;
-    --nit: #345c9c;
-    --nit-bg: #eaf1fb;
-    --question: #5c3d99;
-    --question-bg: #f2ecfb;
-  }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    color: var(--fg);
-    background: var(--bg);
     line-height: 1.6;
-    max-width: 880px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem 4rem;
+    color: #1a1a1a;
+    background: #fafafa;
+    margin: 0;
+    padding: 2rem;
   }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 2.5rem 3rem;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 0.4rem;
+  }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
   code, pre {
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 0.88em;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+  code {
+    background: #f0f0f0;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
   }
   pre {
-    background: var(--code-bg);
-    border: 1px solid var(--border);
+    background: #282c34;
+    color: #e6e6e6;
+    padding: 1rem;
     border-radius: 6px;
-    padding: 0.8rem 1rem;
     overflow-x: auto;
-    white-space: pre;
+    line-height: 1.45;
   }
-  header {
-    border-bottom: 2px solid var(--border);
-    padding-bottom: 1rem;
+  .meta {
+    color: #555;
+    font-size: 0.9rem;
     margin-bottom: 1.5rem;
   }
-  header h1 { margin-bottom: 0.3rem; font-size: 1.4rem; }
-  .meta-table { border-collapse: collapse; margin-top: 0.6rem; }
-  .meta-table td { padding: 0.15rem 0.8rem 0.15rem 0; vertical-align: top; color: var(--muted); }
-  .meta-table td:first-child { font-weight: 600; color: var(--fg); white-space: nowrap; }
-  .meta-table code { background: none; }
-  a { color: #1a56db; }
-  section { margin-bottom: 2.2rem; }
-  h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  .meta div { margin: 0.15rem 0; }
   .verdict-box {
-    border: 1px solid var(--border);
-    border-left: 5px solid var(--should-fix);
-    background: var(--should-fix-bg);
-    border-radius: 4px;
-    padding: 0.9rem 1.1rem;
-  }
-  .verdict-box .label { font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.03em; }
-  ul { padding-left: 1.3rem; }
-  li { margin-bottom: 0.4rem; }
-  .finding {
-    border: 1px solid var(--border);
+    padding: 1rem 1.25rem;
     border-radius: 6px;
-    margin-bottom: 1rem;
-    overflow: hidden;
+    margin: 1rem 0 1.5rem;
+    border-left: 5px solid;
   }
-  .finding-header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    padding: 0.6rem 1rem;
-    font-weight: 600;
+  .verdict-needs-discussion { background: #fff8e1; border-color: #f5a623; }
+  .verdict-approve { background: #e8f7ee; border-color: #2ea44f; }
+  .verdict-request-changes { background: #fdecea; border-color: #d73a49; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.03em; }
+  .finding {
+    margin-bottom: 1.6rem;
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    background: #f9f9f9;
+    border-left: 5px solid #ccc;
   }
-  .finding-body { padding: 0 1rem 1rem; }
-  .finding-body .loc { color: var(--muted); margin-bottom: 0.5rem; }
-  .tag {
+  .finding.blocking { border-color: #d73a49; background: #fdecea; }
+  .finding.should-fix { border-color: #f5a623; background: #fff8e1; }
+  .finding.nit { border-color: #6a737d; background: #f4f4f5; }
+  .finding.question { border-color: #0366d6; background: #eef6fc; }
+  .sev-tag {
+    display: inline-block;
     font-size: 0.7rem;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     padding: 0.15rem 0.5rem;
-    border-radius: 10px;
-    font-weight: 700;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    color: #fff;
+    vertical-align: middle;
   }
-  .tag-blocking { background: var(--blocking); color: white; }
-  .tag-should-fix { background: var(--should-fix); color: white; }
-  .tag-nit { background: var(--nit); color: white; }
-  .tag-question { background: var(--question); color: white; }
-  .finding.blocking { border-left: 5px solid var(--blocking); }
-  .finding.should-fix { border-left: 5px solid var(--should-fix); }
-  .finding.nit { border-left: 5px solid var(--nit); }
-  .finding.question { border-left: 5px solid var(--question); }
-  .hl { background: #fff2a8; }
-  footer { color: var(--muted); font-size: 0.85rem; margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  .finding.blocking .sev-tag { background: #d73a49; }
+  .finding.should-fix .sev-tag { background: #f5a623; }
+  .finding.nit .sev-tag { background: #6a737d; }
+  .finding.question .sev-tag { background: #0366d6; }
+  .loc { color: #555; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  ul.plain { padding-left: 1.3rem; }
+  ul.plain li { margin-bottom: 0.4rem; }
+  a { color: #0366d6; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .hl { background: #fff2a8; padding: 0 2px; }
 </style>
 </head>
 <body>
+<div class="container">
 
-<header>
-  <h1>Review: openshift/sippy #3847</h1>
-  <div style="color: var(--muted); margin-bottom: 0.4rem;">[WIP] Populate base statistics in test_details from aggregate tables</div>
-  <table class="meta-table">
-    <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3847">github.com/openshift/sippy/pull/3847</a></td></tr>
-    <tr><td>Head SHA</td><td><code>232123b3864cc5f35c4efd07ad832f69e9511156</code></td></tr>
-    <tr><td>Base branch</td><td><code>main</code></td></tr>
-    <tr><td>Reviewed at</td><td><code>2026-07-30T17:52:05Z</code></td></tr>
-  </table>
-</header>
+<h1>Review: TRT-2821: Fall back to aggregate tables for base stats in test_details</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3847">openshift/sippy#3847</a></div>
+  <div><strong>Head SHA:</strong> <code>9d2a7f80a7d94d35263eb75888f51b1e7cdea92a</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-03T21:41:28Z</div>
+</div>
 
-<section>
-  <h2>Verdict</h2>
-  <div class="verdict-box">
-    <div class="label">Needs discussion</div>
-    <p>The core approach (deltas from cumulative summaries / GA raw data as a fallback for un-backfilled releases) is sound and mirrors existing patterns in this provider. But there's an unresolved correctness question about whether the all-or-nothing fallback trigger silently breaks the multi-test cache-priming path for partially-backfilled releases, and the implementation diverges from what the PR description says it does (no <code>IsAggregate</code> field exists). PR is explicitly marked work-in-progress, so these are likely already known to the author.</p>
-  </div>
-</section>
+<div class="verdict-box verdict-needs-discussion">
+  <div class="verdict-label">Verdict: Needs discussion</div>
+  <p style="margin-bottom:0">Solid, well-tested rework — a clear improvement over the earlier WIP revision (cleaner <code>TestDetailsSummary</code> type, real end-to-end tests closing prior coverage gaps). One should-fix item carries over unresolved from the earlier review round: the aggregate fallback gate is all-or-nothing across a whole multi-test query batch, which could silently suppress the fallback for some tests when cache-priming a view. Worth a definitive answer from the author before merge; everything else is nit-level.</p>
+</div>
 
-<section>
-  <h2>What this PR does</h2>
-  <ul>
-    <li>Adds a fallback in <code>PostgresProvider.QueryBaseJobRunTestStatus</code>: when the per-run query (<code>prow_job_run_tests</code>) returns nothing for the base release, queries <code>test_cumulative_summaries</code> (prefix-sum delta) or <code>prow_ga_raw_test_data</code> (GA-window releases) instead.</li>
-    <li>Threads a new <code>*string</code> explanation return value through <code>TestDetailsQuerier.QueryBaseJobRunTestStatus</code> → <code>getJobRunTestStatus</code> → <code>internalGenerateTestDetailsReport</code>, replacing a previous static "no backfill" message with a dynamic one only shown when the aggregate fallback actually fired.</li>
-    <li>Distinguishes synthetic aggregate rows from real per-run rows implicitly, via an empty <code>ProwJobRunID</code>; <code>assessTestStats</code> now skips building a <code>JobRunStats</code> entry when that's empty.</li>
-    <li>BigQuery and Mixed providers, plus the <code>releasefallback</code> middleware, are updated only to satisfy the new interface signature — no behavior change on the BQ side.</li>
-    <li>Substantial new integration test coverage for the fallback query itself (prefix-sum, GA, precedence, variant filtering, multi-job, HAVING-filter behavior, metadata population).</li>
-  </ul>
-</section>
+<h2>What this PR does</h2>
+<ul class="plain">
+  <li>Replaces raw per-run <code>TestJobRunRows</code> with pre-aggregated <code>crstatus.TestDetailsSummary</code> (per job/test, with optional <code>[]JobRunDetail</code>) as the return type from both providers.</li>
+  <li>Adds <code>SummarizeTestJobRuns</code> (new file <code>crstatus/summarize.go</code>) to group raw rows into summaries, applied identically by BigQuery and Postgres providers.</li>
+  <li>Adds a Postgres-only fallback (<code>queryBaseAggregateTestDetails</code>) that reads <code>test_cumulative_summaries</code> (prefix-sum, non-GA releases) or <code>prow_ga_raw_test_data</code> (GA releases) when the per-run query returns nothing for the base release — aggregate rows have no <code>JobRuns</code>, so the UI just omits run links.</li>
+  <li>Bumps the BQ Redis cache key V2&rarr;V3 (the cached type shape changed) and fixes <code>TestKeyStr</code> serialization so grouping survives the cache round-trip.</li>
+  <li>Simplifies <code>test_details.go</code> report generation via a new <code>splitByTestKey</code> helper, collapsing three near-identical map-building blocks into one.</li>
+</ul>
 
-<section>
-  <h2>Findings</h2>
+<h2>Findings</h2>
 
-  <h3>Blocking</h3>
-  <div class="finding blocking">
-    <div class="finding-header"><span class="tag tag-blocking">blocking</span> All-or-nothing fallback gate breaks multi-test cache priming</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:168-186</code></div>
-      <p><code>QueryBaseJobRunTestStatus</code> only triggers the aggregate fallback when the per-run query's combined result across the <em>entire</em> <code>reqOptions.TestIDOptions</code> set is empty. <code>GenerateTestDetailsReportMultiTest</code> (used to cache-prime all test details for a view) calls this once for potentially hundreds of test IDs. If even one test/job in that batch has any per-run data for the base release, the fallback is skipped for <em>every other</em> test in the batch — regressing them to all-zero base stats, the exact bug this PR sets out to fix.</p>
-      <pre>result, errs := p.queryTestDetails(...)
+<div class="finding should-fix">
+  <h3><span class="sev-tag">Should fix</span> All-or-nothing fallback gate for multi-test batches</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:233-249</code> (<code>QueryBaseJobRunTestStatus</code>)</div>
+  <p>The aggregate fallback triggers only when <code>len(result) == 0</code> across the <em>entire</em> <code>reqOptions.TestIDOptions</code> batch. <code>GenerateComponentTestDetailsReportMultiTest</code> can call this with multiple test IDs at once (e.g. cache-priming a view). If <span class="hl">even one test/job in the batch has per-run data</span>, the fallback is skipped for every other test in the batch, silently leaving them at zero base stats. This was flagged against the prior WIP revision and still applies. Likely fine if a release's backfill is truly all-or-nothing, but that assumption isn't asserted or tested anywhere.</p>
+  <pre>result, errs := p.queryTestDetails(...)
 if len(errs) > 0 {
-    return result, nil, errs
+    return result, errs
 }
-<span class="hl">if len(result) > 0 {
-    return result, nil, nil
-}</span>
-result, source, errs := p.queryBaseAggregateTestDetails(ctx, reqOptions)</pre>
-      <p>Needs confirmation that target releases are always fully-backfilled-or-fully-absent as a whole; otherwise this gate needs to be per-test/per-job rather than batch-wide.</p>
-    </div>
-  </div>
+if len(result) > 0 {
+    return result, nil
+}
+log.WithField("release", reqOptions.BaseRelease.Name).
+    Info("no per-run base test details found, falling back to aggregate tables")
+return p.queryBaseAggregateTestDetails(ctx, reqOptions)</pre>
+</div>
 
-  <h3>Should fix</h3>
-  <div class="finding should-fix">
-    <div class="finding-header"><span class="tag tag-should-fix">should-fix</span> "IsAggregate" from the PR description doesn't exist; empty ProwJobRunID used as an implicit sentinel</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/test_details.go:562</code> · <code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:396-409</code></div>
-      <p>The PR/commit description states aggregate rows are "marked with <code>IsAggregate=true</code>," but no such field was added to <code>crstatus.TestJobRunRows</code>. Instead:</p>
-      <pre>*testStats = testStats.AddTestCount(jobRow.Count, flakeAsFailure)
-<span class="hl">if jobRow.ProwJobRunID != "" {
-    *jobRunStatsList = append(*jobRunStatsList, c.getJobRunStats(jobRow))
-}</span></pre>
-      <p>Traced both providers to confirm this is safe today: Postgres per-run rows always set <code>ProwJobRunID</code> from <code>pjr.id</code>, and BigQuery always sets it from <code>junit.prowjob_build_id</code>, which is guaranteed non-empty by an inner join. But it's an undocumented, implicit contract rather than the explicit flag described — a future data source that legitimately omits a run ID would be silently miscategorized with no compile-time signal.</p>
-    </div>
-  </div>
+<div class="finding nit">
+  <h3><span class="sev-tag">Nit</span> processAggregateRows duplicates queryTestDetails row-processing logic</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:407-472</code> vs <code>196-228</code></div>
+  <p>Job-variant batch-fetch, <code>RequestedVariants</code> matching, <code>filterByDBGroupBy</code>, <code>JiraComponentID</code> conversion, and result-map assembly are copy-pasted nearly verbatim between the two functions. A shared helper would remove the duplication and prevent drift.</p>
+</div>
 
-  <div class="finding should-fix">
-    <div class="finding-header"><span class="tag tag-should-fix">should-fix</span> No end-to-end test coverage for explanation propagation or JobRunStats exclusion</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/component_report_test.go:1571-1638</code> · <code>test/integration/component_readiness_test.go:1594-1112</code></div>
-      <p>The new <code>TestQueryBaseJobRunTestStatus_AggregateFallback</code> integration tests thoroughly cover the provider-level query in isolation, but nothing exercises the full pipeline: no test confirms <code>baseExplanation</code> actually reaches <code>testdetails.Report.Analyses[*].Explanations</code>, or that aggregate rows are excluded from <code>JobStats.BaseJobRunStats</code> while still contributing to <code>BaseStats</code> totals. The <code>component_report_test.go</code> edit adds a <code>ProwJobRunID</code> to every fixture row specifically to dodge the new skip branch, so that branch is unexercised at the unit level. The multi-test all-or-nothing concern above also has no covering test.</p>
-    </div>
-  </div>
+<div class="finding nit">
+  <h3><span class="sev-tag">Nit</span> New prefix-sum/GA query builders bypass existing shared query abstraction</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:321-405</code> vs <code>cr_queries.go</code> (<code>testStatusSpec</code>/<code>queryTestStatus</code>)</div>
+  <p><code>cr_queries.go</code> already factors the prefix-sum-vs-GA split into a shared abstraction used elsewhere. <code>buildAggregatePrefixSumQuery</code>/<code>buildAggregateGAQuery</code> reimplement the same shape with hand-written SQL instead of reusing it, doubling the surface area a future schema change must touch.</p>
+</div>
 
-  <h3>Nits</h3>
-  <div class="finding nit">
-    <div class="finding-header"><span class="tag tag-nit">nit</span> processAggregateRows duplicates queryTestDetails row-processing logic</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:347-411</code> vs <code>:393-471</code></div>
-      <p>Batch-fetching job variants, <code>RequestedVariants</code> matching, <code>filterByDBGroupBy</code>, <code>JiraComponentID</code> conversion, and result-map assembly are copy-pasted nearly verbatim between the two functions. Extracting a shared helper would remove roughly 50 duplicated lines and prevent the paths drifting apart.</p>
-    </div>
-  </div>
+<div class="finding nit">
+  <h3><span class="sev-tag">Nit</span> Unexplained nolint suppression</h3>
+  <div class="loc"><code>test/integration/component_readiness_test.go:1055</code></div>
+  <p><code>//nolint:unparam</code> added to <code>createGARawData</code> with no comment on why the flagged parameter can't be removed; project convention favors explaining "why", not bare suppressions.</p>
+</div>
 
-  <div class="finding nit">
-    <div class="finding-header"><span class="tag tag-nit">nit</span> New query builders bypass the existing shared prefix-sum/GA abstraction</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:261-345</code> vs <code>cr_queries.go:107-268</code></div>
-      <p><code>cr_queries.go</code> already factors the prefix-sum-vs-GA split into a <code>testStatusSpec</code>/<code>queryTestStatus</code> abstraction used elsewhere. <code>buildAggregatePrefixSumQuery</code>/<code>buildAggregateGAQuery</code> reimplement the same shape with hand-written SQL instead of reusing it — not wrong, but doubles the surface a future schema change must touch.</p>
-    </div>
-  </div>
+<div class="finding nit">
+  <h3><span class="sev-tag">Nit</span> TestDetailsSummary/JobRunDetail lack json tags, inconsistent with sibling type</h3>
+  <div class="loc"><code>pkg/apis/api/componentreport/crstatus/types.go:51-73</code></div>
+  <p><code>TestJobRunStatuses</code> uses explicit snake_case json tags; the new structs have none (default Go field names) except <code>JobRuns</code>. Not a correctness issue &mdash; confirmed this type only round-trips through the internal Redis cache and never reaches the frontend directly &mdash; but cosmetically inconsistent.</p>
+</div>
 
-  <div class="finding nit">
-    <div class="finding-header"><span class="tag tag-nit">nit</span> Unexplained nolint suppression</div>
-    <div class="finding-body">
-      <div class="loc"><code>test/integration/component_readiness_test.go:109</code></div>
-      <p><code>//nolint:unparam</code> added to <code>createGARawData</code> with no comment on why the flagged parameter can't be removed.</p>
-    </div>
-  </div>
+<div class="finding question">
+  <h3><span class="sev-tag">Question</span> Is Postgres-only fallback intentionally exempt from data-provider parity convention?</h3>
+  <div class="loc"><code>pkg/api/componentreadiness/dataprovider/bigquery/provider.go:88-127</code></div>
+  <p>BigQuery/Mixed providers only get the type-signature change, no aggregate-fallback logic. Presumably intentional since BQ retains full history, but the project convention calls for provider parity on data-provider changes &mdash; worth confirming this asymmetry is deliberate and permanent.</p>
+</div>
 
-  <h3>Questions</h3>
-  <div class="finding question">
-    <div class="finding-header"><span class="tag tag-question">question</span> Is the Postgres-only fallback intentionally exempt from the data-provider parity convention?</div>
-    <div class="finding-body">
-      <div class="loc"><code>pkg/api/componentreadiness/dataprovider/bigquery/provider.go:93-111</code> · <code>interface.go:27</code></div>
-      <p>The interface signature change touches BigQuery/Mixed providers, but the fallback behavior is Postgres-only (BQ always returns a <code>nil</code> explanation). Presumably intentional since this targets a Postgres-specific historical backfill gap — worth stating explicitly in the PR description.</p>
-    </div>
-  </div>
-</section>
+<h2>Things I checked and was fine with</h2>
+<ul class="plain">
+  <li>gofmt clean; <code>sets.New[uint]()</code> used instead of hand-rolled <code>map[uint]bool</code> per project convention.</li>
+  <li><code>SummarizeTestJobRuns</code> accumulates raw counts with <code>AddTestCount(row.Count, false)</code> (policy-independent), and callers recompute <code>SuccessRate</code> via <code>Stats.Add(summary.Stats, faf)</code> with the real <code>FlakeAsFailure</code> setting &mdash; verified this doesn't reintroduce a double-aggregation bug.</li>
+  <li>No SQL injection risk: all query args go through gorm <code>?</code> placeholders, including <code>IN (?)</code> slice expansion.</li>
+  <li><code>Explanations: []string{}</code> replacing the old conditional "base details not available" message is correct &mdash; other middleware still appends its own explanations independently; nothing else relied on the removed message.</li>
+  <li>New end-to-end integration tests (<code>TestTestDetailsReport_AggregateBaseStats</code>, <code>TestTestDetailsReport_LastFailureTracking</code>, <code>TestTestDetailsReport_FlakeAsFailure</code>) exercise the full pipeline with aggregate-only base data &mdash; closes the "no end-to-end coverage" gap from the prior WIP-revision review.</li>
+  <li><code>TestQueryBaseJobRunTestStatus_AggregateFallback</code> covers prefix-sum, GA, precedence-over-per-run, variant filtering, multi-job, zero-delta HAVING exclusion, and no-suite ownership.</li>
+</ul>
 
-<section>
-  <h2>Things I checked and was fine with</h2>
-  <ul>
-    <li><code>gofmt</code> clean on all touched files.</li>
-    <li>Prefix-sum delta pattern (self-join with <code>COALESCE</code>, <code>HAVING SUM(...) &gt; 0</code>) matches the existing pattern in <code>queryTestStatusPrefixSum</code>/<code>cr_queries.go</code> — not a new risk.</li>
-    <li>Only <code>total_count</code> delta is checked in the <code>HAVING</code> filter (not success/flake deltas) — matches existing precedent, not a regression introduced here.</li>
-    <li>Frontend (<code>TestDetailsReport.jsx</code>) already renders <code>explanations</code> generically; no frontend change needed.</li>
-    <li>No feature doc or README references this code path; the project's docs-in-same-PR rule isn't triggered.</li>
-    <li>Confirmed via a trace of the BigQuery query generator that <code>ProwJobRunID</code> is effectively always non-empty for legitimate per-run rows on both providers, so the new filter is a no-op for BQ.</li>
-  </ul>
-</section>
+<h2>Open questions for the author</h2>
+<ul class="plain">
+  <li>Can a base release realistically have partial per-run backfill within the same request batch (some jobs/tests present in <code>prow_job_run_tests</code>, others not), or is per-release backfill always all-or-nothing? This determines whether the fallback-gate finding above is a real bug.</li>
+  <li>Is a BigQuery-side equivalent of this fallback planned, or is this permanently Postgres-only by design?</li>
+</ul>
 
-<section>
-  <h2>Open questions for the author</h2>
-  <ul>
-    <li>"Can a base release realistically have partial per-run backfill — some jobs/tests present in <code>prow_job_run_tests</code>, others not — within the same request batch? Or is per-release backfill always all-or-nothing? This determines whether the multi-test fallback gate is a real bug."</li>
-    <li>"Is there a plan to add the <code>IsAggregate</code> field described in the commit message, or was the empty-<code>ProwJobRunID</code> sentinel a deliberate simplification?"</li>
-    <li>"Is a BigQuery-side equivalent of this fallback planned, or is this permanently Postgres-only (dev/local use) by design?"</li>
-  </ul>
-</section>
-
-<footer>Generated by /review:save · openshift/sippy#3847 @ 232123b3864cc5f35c4efd07ad832f69e9511156</footer>
-
+</div>
 </body>
 </html>
