@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3852</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table { border-collapse: collapse; }
+  header td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+  header td.k { color: #666; font-size: 0.9em; white-space: nowrap; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1.02rem; margin-top: 1.4rem; margin-bottom: 0.3rem; }
+  .verdict-box {
+    background: #fff8e1;
+    border: 1px solid #e0c060;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .verdict-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: 0.85em;
+    color: #8a6d00;
+  }
+  .finding {
+    border-left: 4px solid #ccc;
+    padding: 0.4rem 0 0.4rem 1rem;
+    margin-bottom: 1.6rem;
+  }
+  .finding.blocking { border-left-color: #d33; }
+  .finding.should-fix { border-left-color: #d98c00; }
+  .finding.nit { border-left-color: #999; }
+  .finding.question { border-left-color: #3a7bd5; }
+  .badge {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .badge.blocking { background: #d33; }
+  .badge.should-fix { background: #d98c00; }
+  .badge.nit { background: #999; }
+  .badge.question { background: #3a7bd5; }
+  .loc { color: #555; font-size: 0.85em; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.35rem; }
+  .hl { background: #ffe9a8; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3852</h1>
+  <table>
+    <tr><td class="k">Title</td><td>TRT-2848: Refresh summary tables incrementally during prow load</td></tr>
+    <tr><td class="k">PR</td><td><a href="https://github.com/openshift/sippy/pull/3852">github.com/openshift/sippy/pull/3852</a></td></tr>
+    <tr><td class="k">Head SHA</td><td><code>3ba7641f7470e8e28746ebebad76cd7cdd7b8d79</code></td></tr>
+    <tr><td class="k">Base</td><td><code>main</code></td></tr>
+    <tr><td class="k">Reviewed at</td><td><code>2026-07-31T11:03:11Z</code></td></tr>
+  </table>
+</header>
+
+<p style="color:#555; font-size:0.9em; margin-top:-0.5rem;"><em>Since previous review (2026-07-30T23:16:32Z): no code changes. petr-muller (reviewer) submitted an <code class="inline">APPROVED</code> review with <code class="inline">/hold</code> at 2026-07-31T11:00:51Z, noting reduced confidence in this area of the DB layer and requesting a second pair of eyes with stronger DB expertise before unholding. The blocking finding below remains unaddressed.</em></p>
+
+<div class="verdict-box">
+  <div class="verdict-label">Verdict: Needs discussion</div>
+  <p>This is a well-executed refactor with strong test coverage (32 new integration tests) and a genuinely clean extraction of DB-write logic into a dedicated <code class="inline">pgwriter</code> package — diffed the moved SQL against the deleted originals and it's a byte-identical relocation. The blocker is a design question, not a bug: a single future-dated test result rolls back the <em>entire</em> batch (up to 100 job runs), and because those runs never get marked "loaded," this can become a poison pill that wedges ingestion indefinitely. Worth resolving with the author before merge — either by design decision or by scoping the rejection to the offending run.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces the periodic full-table refresh of <code class="inline">test_daily_totals</code>/<code class="inline">test_cumulative_summaries</code> with per-batch incremental upserts run during prow loading.</li>
+  <li>Extracts DB-write logic from <code class="inline">prow.go</code> into a new <code class="inline">pkg/dataloader/prowloader/pgwriter</code> package with focused, single-responsibility functions per SQL step.</li>
+  <li>Parallelizes cross-release carry-forward using an <code class="inline">errgroup</code> (limit 4 workers).</li>
+  <li>Pins <code class="inline">currentDate</code> once at <code class="inline">ProwLoader</code> construction and threads it through all summary SQL to avoid midnight-crossing corruption.</li>
+  <li>Removes the old <code class="inline">dailysummary.Refresh</code>/<code class="inline">cumulativesummary.Refresh</code> calls from <code class="inline">RefreshData</code>; that code path is retained and still used by the existing <code class="inline">sippy backfill</code> command.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+<div class="finding blocking">
+  <span class="badge blocking">Blocking</span><strong>Future-dated test result rolls back the entire batch, not just the offending run</strong>
+  <p class="loc"><code>pkg/dataloader/prowloader/pgwriter/pgwriter.go:596-609</code></p>
+  <pre>tomorrow := currentDate.AddDays(1)
+var hasFuture bool
+if err := tx.QueryRow(ctx, <span class="hl">`SELECT EXISTS(SELECT 1 FROM batch_deltas WHERE batch_date &gt; $1)`</span>, tomorrow).Scan(&amp;hasFuture); err != nil {
+    return fmt.Errorf("checking for future-dated batch rows: %w", err)
+}
+if hasFuture {
+    <span class="hl">return fmt.Errorf("batch contains test results dated after %s; refusing to write summaries", tomorrow)</span>
+}</pre>
+  <p><code>upsertSummaryTables</code> checks for any row dated more than one day past <code class="inline">currentDate</code>, and if found, returns an error. That error propagates out of <code class="inline">Write()</code>, rolling back the <em>whole transaction</em> — including <code class="inline">prow_job_runs</code>, annotations, PR associations, and test inserts for every run in the batch (up to <code class="inline">flushThreshold = 100</code>). One job with a clock-skewed timestamp can drop up to 99 unrelated, valid runs. Because the failing run's ID never lands in <code class="inline">prow_job_runs</code>, it's never marked "loaded" and will be re-fetched and re-fail every subsequent load cycle &mdash; a poison pill that can wedge ingestion indefinitely. The only test covering this (<code class="inline">TestFutureDatedTestResultsRejectBatch</code>) uses a single-run batch, so the collateral damage to co-batched runs is untested.</p>
+</div>
+
+<h3>Should fix</h3>
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span><strong>Prometheus histogram removed with no replacement</strong>
+  <p class="loc"><code>pkg/sippyserver/server.go:148-153 (deleted)</code></p>
+  <pre>-var cumulativeSummaryRefreshMetric = promauto.NewHistogram(prometheus.HistogramOpts{
+-	Name:    "sippy_cumulative_summary_refresh_millis",
+-	Help:    "Milliseconds to refresh the cumulative summary tables",
+-	Buckets: []float64{100, 500, 1000, 5000, 10000, 30000, 60000, 300000, 600000},
+-})</pre>
+  <p>The old histogram is deleted with the old refresh call; the new incremental path only emits <code class="inline">log.Debug</code> lines with elapsed time. Any dashboard/alert on <code class="inline">sippy_cumulative_summary_refresh_millis</code> goes silently stale. Not called out as an intentional observability change in the PR description.</p>
+</div>
+
+<h3>Nits</h3>
+<div class="finding nit">
+  <span class="badge nit">Nit</span><strong>Postgres-specific NULL-ignoring semantics of LEAST/GREATEST used without comment</strong>
+  <p class="loc"><code>pkg/dataloader/prowloader/pgwriter/pgwriter.go:720-742, 766-794</code></p>
+  <pre>first_failure_timestamp = LEAST(dt.first_failure_timestamp, bd.min_failure_ts),
+last_failure_timestamp = GREATEST(dt.last_failure_timestamp, bd.max_failure_ts),</pre>
+  <p>Correct only because Postgres's <code class="inline">LEAST</code>/<code class="inline">GREATEST</code> ignore NULL arguments (non-ANSI-standard). Columns start NULL via <code class="inline">ensureDailyTotalRows</code>/<code class="inline">ensureCumulativeSummaryRows</code>. A one-line comment would help a future reader who assumes standard SQL NULL-propagation.</p>
+</div>
+
+<h3>Questions</h3>
+<div class="finding question">
+  <span class="badge question">Question</span><strong>Is the batch-wide rejection on future-dated data an intentional tradeoff?</strong>
+  <p>Is "fail the whole batch loudly" preferred over "skip/clamp the offending run's summary contribution and keep the rest"? If intentional, is there a runbook or tooling to identify and un-wedge a stuck batch in production?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li><code>gofmt -l</code> clean on all touched files; <code>go vet ./pkg/dataloader/prowloader/...</code> clean.</li>
+  <li><code>golang.org/x/sync/errgroup</code> already a repo dependency (used elsewhere) — no new dependency risk.</li>
+  <li>Moved SQL/Go bodies (<code>insertJobRuns</code>, <code>insertAnnotations</code>, <code>upsertPullRequests</code>, <code>insertPRAssociations</code>, <code>insertTestResults</code>) are byte-identical to what was deleted from <code>prow.go</code> — pure relocation, no incidental behavior change.</li>
+  <li><code>ensureCumulativeSummaryRows</code>'s <code>GROUP BY</code> over query-literal columns is valid SQL, not a bug.</li>
+  <li><code>carryForwardRelease</code>/<code>findLatestDateWithData</code>'s day-by-day backward walk (capped at 30 days) is idempotent — confirmed against <code>TestCarryForwardIsIdempotent</code> and the "already up to date" short-circuit.</li>
+  <li>No BigQuery counterpart exists for these summary tables (Postgres-only ETL, not part of the dual-provider <code>componentreadiness/dataprovider</code> abstraction) — the project's BQ/Postgres parity rule doesn't apply here.</li>
+  <li><code>RefreshData</code>'s doc comment accurately reflects new behavior; <code>dailysummary</code>/<code>cumulativesummary</code> imports in <code>server.go</code> are still used by <code>BackfillData</code> — no dead code left behind.</li>
+  <li><code>accumulate_test.go</code> mechanically updated to new <code>pgwriter.JobRunResult</code>/<code>pgwriter.RunRow</code> types and the refactored <code>accumulateAndWrite(ctx, results, writerFunc)</code> signature — correct, no behavior change.</li>
+  <li>Test coverage of happy paths, carry-forward parallelism, release scoping, soft-delete restoration, PR metadata preservation, and dedup is thorough.</li>
+  <li>No SQL string concatenation of untrusted input; all queries parameterized.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>"Is the batch-wide rollback on future-dated test data an accepted risk, or should this PR scope the rejection to just the offending job run(s) before merge?"</li>
+  <li>"Is there existing or planned tooling to detect and clear a stuck poison-pill batch in production?"</li>
+  <li>"Was dropping <code>cumulativeSummaryRefreshMetric</code> intentional, or should an equivalent metric be added for the new incremental path?"</li>
+</ul>
+
+</body>
+</html>
