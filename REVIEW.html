@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3865</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; color: #1a1a1a; }
+  code, pre { font-family: SFMono-Regular, Consolas, Menlo, monospace; background: #f5f5f5; padding: 0.15rem 0.35rem; border-radius: 3px; font-size: 0.9em; }
+  pre { padding: 0.75rem; overflow-x: auto; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .meta { background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem 1.5rem; font-size: 0.95em; }
+  .meta div { margin: 0.2rem 0; }
+  .verdict { background: #eaf7ea; border-left: 4px solid #2e8b2e; padding: 0.75rem 1rem; border-radius: 4px; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+  .finding h3 { margin-top: 0; font-size: 1.05em; }
+  .sev-blocking { border-left: 5px solid #c0392b; }
+  .sev-should-fix { border-left: 5px solid #d68910; }
+  .sev-nit { border-left: 5px solid #7f8c8d; }
+  .sev-question { border-left: 5px solid #2980b9; }
+  .tag { display: inline-block; font-size: 0.75em; text-transform: uppercase; font-weight: bold; padding: 0.1rem 0.5rem; border-radius: 3px; margin-right: 0.5rem; color: white; }
+  .tag-nit { background: #7f8c8d; }
+  .tag-question { background: #2980b9; }
+  ul { padding-left: 1.3rem; }
+  a { color: #2980b9; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3865</h1>
+<div class="meta">
+  <div><strong>Title:</strong> INTEROP-9317: Add OPP LP interop variant and CR view for OCP 4.22</div>
+  <div><strong>Head SHA:</strong> <code>a961047a0fc39e4ba96ce81f309fe4bd1c875529</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-05T22:06:49Z</div>
+  <div><strong>Link:</strong> <a href="https://github.com/openshift/sippy/pull/3865">github.com/openshift/sippy/pull/3865</a></div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong> This is a small, additive, well-scoped classification change that follows an existing established pattern exactly (mirrors the <code>4.22-LP-Interop--lpMainline</code> view). The snapshot and test updates are consistent with the intended behavior, including the automatic JobTier downgrade. Only cosmetic nits remain.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds a new <code>LayeredProduct</code> classification value, <code>lp-interop--OPP</code>, matched via the job-name substring <code>-interop-opp-</code>.</li>
+  <li>Adds a new component-readiness view <code>4.22-LP-Interop--OPP</code> in <code>config/views.yaml</code>, structurally identical to the existing <code>4.22-LP-Interop--lpMainline</code> view.</li>
+  <li>Regenerates <code>pkg/variantregistry/snapshot.yaml</code> for the 5 real affected jobs (4.22 and 5.0 releases, aws/vsphere/upgrade), flipping <code>LayeredProduct: none → lp-interop--OPP</code> and <code>JobTier: informing → candidate</code>.</li>
+  <li>Adds two new table-driven test cases (aws, vsphere) verifying full expected variant maps for the new classification.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding sev-nit">
+  <span class="tag tag-nit">Nit</span>
+  <h3>Inconsistent casing for the new LayeredProduct value</h3>
+  <p><code>pkg/variantregistry/ocp.go:1374</code></p>
+  <pre>{"-coo-", "lp-interop-coo"},
+{"-acm-cnv-", "lp-interop--acm-virt"},
+{"-acm-virt-", "lp-interop--acm-virt"},
+<span style="background:#fff3cd">{"-interop-opp-", "lp-interop--OPP"},</span></pre>
+  <p>Every other entry in this pattern list is lowercase (<code>lp-interop-coo</code>, <code>lp-interop--acm-virt</code>, <code>lp-ocp-compat--odf--lpGA</code>), but this one uses <code>lp-interop--OPP</code>. Harmless functionally &mdash; matching runs on <code>strings.ToLower(jobName)</code> and the value is opaque &mdash; but it breaks the established lowercase convention for variant values that also propagate into <code>config/views.yaml</code> and <code>snapshot.yaml</code>.</p>
+</div>
+
+<div class="finding sev-nit">
+  <span class="tag tag-nit">Nit</span>
+  <h3>Test job names don't match real job name shape</h3>
+  <p><code>pkg/variantregistry/ocp_test.go:1802,1831</code></p>
+  <pre>job: "periodic-ci-stolostron-policy-collection-main-ocp4.22-<span style="background:#fff3cd">lp-</span>interop-opp-aws"</pre>
+  <p>Test fixtures use <code>...ocp4.22-lp-interop-opp-aws</code> / <code>...vsphere</code>, but the real jobs in <code>snapshot.yaml</code> are named <code>...ocp4.22-interop-opp-aws</code> (no <code>lp-</code> segment). Both match the <code>-interop-opp-</code> substring so the tests still exercise the correct code path, but the fixture doesn't mirror production job naming.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Pattern placement in <code>setLayeredProduct</code> (ocp.go:1371-1374): specific substring, no collision risk with other <code>lp-interop-*</code>/<code>-virt</code>/<code>-cnv</code> entries, correctly ordered before generic fallbacks.</li>
+  <li><code>snapshot.yaml</code> diff: exactly the 5 real affected jobs (4.22 and 5.0 releases, aws/vsphere/upgrade) flip <code>LayeredProduct: none &rarr; lp-interop--OPP</code>.</li>
+  <li><code>JobTier: informing &rarr; candidate</code> downgrade in the snapshot is expected/automatic via <code>adjustJobTierBasedOnView</code> (ocp.go:379) since the new LP value isn't in the main release view's <code>include_variants</code> &mdash; consistent with prior LP additions, not a manual/separate change.</li>
+  <li><code>config/views.yaml</code> new view (<code>4.22-LP-Interop--OPP</code>) is a structural clone of <code>4.22-LP-Interop--lpMainline</code> (same column_group_by/db_group_by/advanced_options); only <code>include_variants.LayeredProduct</code> differs.</li>
+  <li>No other files reference layered-product identifiers (<code>lp-interop-coo</code>, <code>lp-interop--acm-virt</code>, <code>lp-ocp-compat--acs</code>) outside the four changed files, so no missed touch points.</li>
+  <li>Two new table-driven test cases (aws, vsphere) cover full expected variant maps including the new field.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Was <code>lp-interop--OPP</code> casing intentional (branding/acronym), or should it be <code>lp-interop--opp</code> for consistency with sibling values?</li>
+</ul>
+
+</body>
+</html>
