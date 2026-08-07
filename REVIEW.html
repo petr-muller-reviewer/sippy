@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3874</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fff;
+  }
+  code, pre, .mono {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0.5rem 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.3rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-top: 2rem; }
+  h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .verdict {
+    background: #fff3cd;
+    border: 1px solid #e0c36f;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    margin: 1rem 0;
+  }
+  .verdict .label { font-weight: 700; text-transform: uppercase; font-size: 0.85em; color: #8a6d1a; }
+  .finding {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .finding .loc {
+    display: block;
+    color: #555;
+    margin-bottom: 0.5rem;
+  }
+  .sev {
+    display: inline-block;
+    font-size: 0.75em;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+  }
+  .sev-blocking { background: #fdd; color: #a00; }
+  .sev-should-fix { background: #ffe8cc; color: #a05a00; }
+  .sev-nit { background: #e8e8e8; color: #555; }
+  .sev-question { background: #dbe9ff; color: #1a4b8a; }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 0.7rem 1rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  ul { padding-left: 1.3rem; }
+  a { color: #0969da; }
+  .hl { background: #fff2a8; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review of <span class="mono">openshift/sippy#3874</span></h1>
+  <p><em>[WIP] TRT-2847: Fix aggregate test details variant filter excluding valid jobs</em></p>
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3874">openshift/sippy#3874</a></dd>
+    <dt>Head SHA</dt><dd class="mono">29203eb82aca1a36b707bd43f3761ae61886d54f</dd>
+    <dt>Base</dt><dd class="mono">main</dd>
+    <dt>Reviewed at</dt><dd class="mono">2026-08-07T17:12:38Z</dd>
+  </dl>
+</header>
+
+<section class="verdict">
+  <div class="label">Verdict: Request changes</div>
+  <p>The fix correctly stops the aggregate-fallback query from returning zero rows for older releases, but it does so by dropping the JobTier/Owner/CGroupMode/ContainerRuntime filters entirely rather than making them tolerant of missing data — nothing downstream re-applies those filters, so disallowed-tier jobs can now silently leak into base aggregate stats. A second, independent gap in the same function means an empty <code>dbGroupBy</code> silently disables <em>all</em> variant filtering, not just the newer keys. Worth resolving (or explicitly justifying as safe) before merge.</p>
+</section>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Fixes <code>queryBaseAggregateTestDetails</code> (fallback path used when <code>prow_job_run_tests</code> has no per-run data for the base release) returning zero rows for older releases (e.g. 4.21 in the 5.0-main view).</li>
+  <li>Root cause: the view's <code>includeVariants</code> (JobTier, CGroupMode, ContainerRuntime, Owner) was AND-ed wholesale into the SQL <code>variant_combinations</code> array-overlap filter, but older releases' rows lack those newer keys, so the filter always failed.</li>
+  <li>Fix: <code>filterVariantsByDBGroupBy</code> (<code>variants.go</code>) strips <code>includeVariants</code> down to only <code>dbGroupBy</code> keys before building the SQL WHERE clause.</li>
+  <li>PR is <strong>CLOSED</strong> (WIP label), never merged via GitHub (<code>mergedAt</code>/<code>mergeCommit</code> both null), but its single commit is already present on <code>main</code>.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+<div class="finding">
+  <span class="loc"><span class="sev sev-blocking">blocking</span><code>variants.go:171-183</code>, <code>provider.go:532</code>, <code>provider.go:667-713</code> (processAggregateRows), <code>provider.go:84-105</code> (matchRequestedVariants)</span>
+  <strong>Stripped includeVariants keys are never re-applied, dropping JobTier/Owner/etc. filtering entirely in the aggregate fallback path</strong>
+  <p><code>filterVariantsByDBGroupBy</code> removes JobTier/Owner/CGroupMode/ContainerRuntime from the SQL filter, but nothing re-applies them afterward. <code>processAggregateRows</code> → <code>matchRequestedVariants</code> only checks (a) <code>reqOptions.TestIDOptions[].RequestedVariants</code> (a narrow single-test override) and (b) <code>filterByDBGroupBy</code>, which only labels the output key rather than excluding anything. <code>matchesIncludeVariants</code> (<code>provider.go:119</code>) does the correct check but is wired into an unrelated code path (<code>provider.go:786</code>), not into <code>processAggregateRows</code>. No earlier stage narrows candidate jobs by these keys either — <code>IncludeVariants</code> comes straight from view config (e.g. <code>JobTier: [blocking, informing, standard]</code>, never in <code>db_group_by</code>). Net effect: aggregate base stats can now silently include jobs of any JobTier/Owner/CGroupMode/ContainerRuntime value. This also breaks parity with BigQuery's <code>NewBaseTestDetailsQueryGenerator</code>, which passes the full unstripped <code>IncludeVariants</code>.</p>
+  <pre>func filterVariantsByDBGroupBy(includeVariants map[string][]string, dbGroupBy sets.Set[string]) map[string][]string {
+    filtered := make(map[string][]string, dbGroupBy.Len())
+    for k, v := range includeVariants {
+        if dbGroupBy.Has(k) {
+            filtered[k] = v
+        }
+    }
+    return filtered
+}</pre>
+</div>
+<div class="finding">
+  <span class="loc"><span class="sev sev-blocking">blocking</span><code>variants.go:175</code>, <code>provider.go:613-618,651-656</code> (buildAggregatePrefixSumQuery, buildAggregateGAQuery), <code>pkg/api/utils.go:14-27</code> (VariantsStringToSet)</span>
+  <strong>Empty-but-non-nil DBGroupBy silently disables variant filtering entirely</strong>
+  <p><code>VariantsStringToSet</code> returns a non-nil empty <code>sets.Set[string]{}</code> whenever the <code>dbGroupBy</code> query param is absent/empty, not nil. <code>filterVariantsByDBGroupBy</code> then strips <code>includeVariants</code> down to <code>{}</code> since <code>dbGroupBy.Has(k)</code> is false for every key. Both SQL builders guard with <code>if len(includeVariants) &gt; 0</code>, treating the emptied map as "no filter requested" rather than "filter matches nothing" — a caller intending to filter to e.g. <code>Platform:aws</code>/<code>Network:ovn</code> instead silently gets results summed across every combination in the release. This is distinct from the JobTier/Owner leak above: it applies to <em>all</em> <code>includeVariants</code> keys whenever <code>dbGroupBy</code> itself is empty.</p>
+  <pre>func filterVariantsByDBGroupBy(includeVariants map[string][]string, dbGroupBy sets.Set[string]) map[string][]string {
+    filtered := make(map[string][]string, dbGroupBy.Len())
+    for k, v := range includeVariants {
+        if dbGroupBy.Has(k) {
+            filtered[k] = v
+        }
+    }
+    return filtered
+}
+// buildAggregatePrefixSumQuery / buildAggregateGAQuery:
+if len(includeVariants) > 0 {
+    filterClause, filterArgs := buildVariantFilterClause(includeVariants)
+    ...
+}</pre>
+</div>
+
+<h3>Should fix</h3>
+<div class="finding">
+  <span class="loc"><span class="sev sev-should-fix">should-fix</span><code>test/integration/component_readiness_test.go:1855-1907</code></span>
+  <strong>Integration test only covers the false-negative fix, not the potential false-positive regression</strong>
+  <p>The new subtest ("non-dbGroupBy includeVariants keys do not exclude valid jobs") seeds one job whose variant_combination lacks JobTier/Owner/CGroupMode and asserts it's no longer wrongly excluded. There's no test seeding two jobs with identical <code>dbGroupBy</code> dims but different JobTier values (one allowed, one not) asserting only the allowed one contributes — exactly the scenario the blocking finding would break silently.</p>
+  <pre>result, errs := provider.QueryBaseJobRunTestStatus(context.Background(), opts)
+require.Empty(t, errs)
+totalRows := 0
+for _, rows := range result {
+    totalRows += len(rows)
+}
+require.Equal(t, 1, totalRows, "non-dbGroupBy variant keys should not exclude valid jobs")</pre>
+</div>
+<div class="finding">
+  <span class="loc"><span class="sev sev-should-fix">should-fix</span><code>provider.go:532</code> (call site), <code>cr_queries.go:142</code> (mergeRequestedVariants, sibling path not covered)</span>
+  <strong>Fix applied only at one call site, not in shared variant-filter infrastructure</strong>
+  <p><code>filterVariantsByDBGroupBy</code> is only invoked from <code>queryBaseAggregateTestDetails</code>. The sibling per-run path <code>queryTestDetails</code>, and <code>cr_queries.go</code>'s <code>queryTestStatus</code> (via <code>mergeRequestedVariants</code>), don't get the same treatment. If either later hits the same "older release missing variant_combinations keys" gap this PR fixes, the identical over-constraining bug reappears there since the fix isn't centralized.</p>
+  <pre>includeVariants = filterVariantsByDBGroupBy(includeVariants, reqOptions.VariantOption.DBGroupBy)
+// provider.go:532 — the only call site</pre>
+</div>
+
+<h3>Nits</h3>
+<div class="finding">
+  <span class="loc"><span class="sev sev-nit">nit</span><code>provider.go:74-81</code>, <code>variants.go:175-182</code>, <code>variants.go:76-83</code></span>
+  <strong>Three near-identical "filter map by dbGroupBy" implementations</strong>
+  <p>Three copies of the same "keep only keys present in dbGroupBy" loop exist across two files (<code>filterByDBGroupBy</code>, <code>filterVariantsByDBGroupBy</code>, and an inline loop in <code>lookupVariantValues</code>), differing only in map value type. A future behavior change — e.g. how an empty <code>dbGroupBy</code> should be handled, per the blocking finding above — has to be replicated in all three or it silently diverges.</p>
+  <pre>func filterByDBGroupBy(variants map[string]string, dbGroupBy sets.Set[string]) map[string]string { ... }
+func filterVariantsByDBGroupBy(includeVariants map[string][]string, dbGroupBy sets.Set[string]) map[string][]string { ... }
+// plus an inline third copy in lookupVariantValues</pre>
+</div>
+<div class="finding">
+  <span class="loc"><span class="sev sev-nit">nit</span><code>variants.go:176</code></span>
+  <strong>make() capacity hint sized by the wrong collection</strong>
+  <p><code>make(map[string][]string, dbGroupBy.Len())</code> sizes the map by <code>dbGroupBy</code>'s length rather than <code>includeVariants</code>'s (the collection actually being iterated). Harmless, and consistent with the same pre-existing pattern in <code>lookupVariantValues</code>.</p>
+  <pre>filtered := make(map[string][]string, dbGroupBy.Len())
+for k, v := range includeVariants {</pre>
+</div>
+
+<h3>Questions</h3>
+<div class="finding">
+  <span class="loc"><span class="sev sev-question">question</span><code>variants.go:171-174</code> (comment)</span>
+  <strong>Is dropping JobTier/Owner filtering in this path actually safe?</strong>
+  <p>The code comment says the over-constraint "can" cause problems but doesn't explain why fully dropping the constraint (rather than making it tolerant of absent-in-DB values) is safe. If JobTier/Owner are structurally never meaningfully populated for jobs reaching this fallback path, that reasoning should be stated explicitly; otherwise the blocking finding above stands.</p>
+</div>
+<div class="finding">
+  <span class="loc"><span class="sev sev-question">question</span>PR metadata vs <code>main</code> history</span>
+  <strong>PR was closed without merging, but its commit is already on main</strong>
+  <p>PR state is <code>CLOSED</code> with <code>mergedAt</code>/<code>mergeCommit</code> both null, yet commit <code>29203eb82</code> is present on <code>main</code>. Was this landed intentionally outside the normal PR merge flow, and should this PR be reopened/linked or closed as superseded?</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL query builders (<code>buildAggregatePrefixSumQuery</code>, <code>buildAggregateGAQuery</code>) correctly consume the now-filtered <code>includeVariants</code> via the existing <code>buildVariantFilterClause</code>; parameterized placeholders, no injection risk.</li>
+  <li>Unit test <code>TestFilterVariantsByDBGroupBy</code> — solid table-driven coverage of the new pure function, follows project convention.</li>
+  <li>The non-aggregate per-run path (<code>queryTestDetails</code>, <code>provider.go:380-421</code>) intentionally still uses the full unstripped <code>includeVariants</code> — this fix is correctly scoped to only the aggregate-fallback path used for older releases.</li>
+  <li>No other call sites of <code>filterVariantsByDBGroupBy</code> introduced; single call site at <code>provider.go:532</code>.</li>
+  <li><code>gofmt</code>/<code>go vet</code> could not be run (no Go toolchain in the review sandbox); diff style otherwise matches surrounding code.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Does any release actually have a mix of allowed/disallowed JobTier (or Owner) values among jobs that share the same dbGroupBy dimensions? If so, this fix as written will silently include disallowed jobs in base aggregate stats.</li>
+  <li>Should <code>processAggregateRows</code> re-apply <code>matchesIncludeVariants</code> (guarded on the key being present in the row's own variants, to avoid resurrecting the zero-rows bug) instead of dropping the constraint universally in SQL?</li>
+  <li>Can <code>reqOptions.VariantOption.DBGroupBy</code> actually be empty for requests that reach <code>queryBaseAggregateTestDetails</code> in production? If so, <code>includeVariants</code> filtering is silently disabled for those requests today.</li>
+  <li>Why is this PR closed unmerged while its commit already exists on <code>main</code>?</li>
+</ul>
+
+</body>
+</html>
