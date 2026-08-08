@@ -32,7 +32,7 @@
     <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3860">openshift/sippy#3860</a></dd>
     <dt>Head SHA</dt><dd><code>20313de85b942456d280438cd47ab023ddeb4add</code></dd>
     <dt>Base</dt><dd><code>main</code></dd>
-    <dt>Reviewed at</dt><dd>2026-08-03T20:48:00Z</dd>
+    <dt>Reviewed at</dt><dd>2026-08-08T11:37:27Z</dd>
   </dl>
 </header>
 
@@ -70,6 +70,8 @@
   <li>The new HyperShift regexp's unanchored trailing <code>.*</code> matches existing style in the same block (e.g. the <code>ocm-fvt-.*-staging-.*</code> line).</li>
   <li>Widening <code>master</code> &rarr; <code>(master|main)</code> is scoped tightly enough (combined with <code>rosa-sts</code>/<code>osd-gcp</code> and <code>e2e-promotion-(int|stage)</code>) that accidental overbroad matches across unrelated jobs are unlikely.</li>
   <li>No test coverage exists or is expected here &mdash; this is runtime-loaded YAML with no schema/regex tests in the repo, consistent with prior commits that touched only this file.</li>
+  <li>Independent second-pass review (line-by-line diff, cross-file trace into <code>pkg/releaseoverride/override.go</code> and <code>pkg/variantregistry/synthetic.go</code>) confirmed no correctness or convention issues.</li>
+  <li><code>SyntheticReleaseOverrides.Lookup</code> iterates the <code>releases</code> map in nondeterministic order, so a job matching regexes in two different synthetic releases could resolve inconsistently; not triggered here since the new patterns use disjoint literal substrings (<code>-staging-</code> vs <code>-integration-</code>, <code>-promotion-stage$</code> vs <code>-promotion-int$</code>) across releases. Pre-existing structural property of the override mechanism, not introduced by this PR.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
