@@ -55,15 +55,15 @@
 <div class="meta">
   <div><span class="label">PR</span> <a href="https://github.com/openshift/sippy/pull/3876">openshift/sippy#3876</a></div>
   <div><span class="label">Title</span> TRT-2821: Optimize GetJobRunTestsCountByLookback using cumulative summaries</div>
-  <div><span class="label">Head SHA</span> <code>eeccb8e3c03c0befc5fef5d9eb8da1e91e166156</code></div>
+  <div><span class="label">Head SHA</span> <code>ae890fbbaf5f72c98471a91400dfafcbd8c567f5</code></div>
   <div><span class="label">Base</span> main</div>
-  <div><span class="label">Reviewed at</span> 2026-08-05T22:40:16Z</div>
+  <div><span class="label">Reviewed at</span> 2026-08-08T12:04:34Z</div>
 </div>
 
 <h2>Verdict</h2>
 <div class="verdict-box verdict-request-changes">
   <div class="verdict-label">Request changes</div>
-  <p>The performance approach is sound and well-benchmarked, and the date-boundary math (hand-verified) is correct and consistent between the two returned counts. But there's a real goroutine leak on the errgroup error path, and a latent correctness risk from querying <code>date = today</code> in <code>test_cumulative_summaries</code> without the defensive "clamp to latest available date" pattern every other caller in the codebase uses. Neither is a blocker for the happy path, but both should be fixed before merge given this runs on every refresh cycle.</p>
+  <p>The performance approach is sound and well-benchmarked, and the date-boundary math (hand-verified) is correct and consistent between the two returned counts. But there's a real goroutine leak on the errgroup error path, an unnecessarily indirect fan-in mechanism that's the source of that leak, and a latent correctness risk from querying <code>date = today</code> in <code>test_cumulative_summaries</code> without the defensive "clamp to latest available date" pattern every other caller in the codebase uses. None are blockers for the happy path, but all should be fixed before merge given this runs on every refresh cycle.</p>
 </div>
 
 <h2>What this PR does</h2>
@@ -87,6 +87,21 @@
 close(ch)
 &lt;-done</pre>
   <p>Fix: close (and drain) before checking the error, e.g. <code>err := g.Wait(); close(ch); &lt;-done; if err != nil { return -1, -1, err }</code>.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">should-fix</span>Channel/collector-goroutine fan-in is unnecessary indirection</h3>
+  <div class="loc"><code>pkg/api/tests.go:419-427,457,464-465</code></div>
+  <p>The channel plus separate collector goroutine exists only to merge per-release <code>[]int64</code> results into a <code>sets.Set[int64]</code>. A <code>sync.Mutex</code> guarding <code>testIDs.Insert(ids...)</code> called directly inside each <code>g.Go</code> closure gives the same result with less code, no channel lifecycle to manage, and removes the leak above entirely — there's nothing to forget to close. It would also be more consistent with the simpler errgroup fan-out pattern already used in <code>pkg/api/job_runs.go</code>.</p>
+  <pre>ch := make(chan []int64, len(releases))
+testIDs := sets.New[int64]()
+done := make(chan struct{})
+go func() {
+    for ids := range ch {
+        testIDs.Insert(ids...)
+    }
+    close(done)
+}()</pre>
 </div>
 
 <div class="finding">
@@ -123,6 +138,7 @@ close(ch)
   <li>Loop variable capture in <code>g.Go(func() error { ... release ... })</code> — safe under Go 1.25 per-iteration loop var semantics (confirmed via <code>go.mod</code>).</li>
   <li>Structured logging (<code>log.WithField(s)</code>) used instead of <code>Infof</code> string formatting, per project convention.</li>
   <li><code>sets.New[int64]()</code> used for dedup per project convention (no hand-rolled <code>map[string]bool</code>).</li>
+  <li>No BigQuery counterpart exists for <code>GetJobRunTestsCountByLookback</code>, so the CLAUDE.md provider-parity rule does not apply here.</li>
   <li>gofmt/style of new code visually consistent with the rest of the file (could not run <code>gofmt</code>/<code>go vet</code> directly — toolchain unavailable in this sandbox).</li>
 </ul>
 
@@ -130,6 +146,7 @@ close(ch)
 <ul>
   <li>Is there a reason <code>GetJobRunTestsCountByLookbackAt</code> doesn't clamp to <code>MAX(date)</code> like <code>ResolveDateRanges</code> does elsewhere, or is <code>refreshMaterializedViews</code>'s post-cumulative-refresh call order considered a sufficient guarantee going forward?</li>
   <li>Was the goroutine-leak-on-error path noticed during benchmarking, or did all iterations succeed so it never triggered?</li>
+  <li>Any reason to prefer the channel-based fan-in over a mutex-guarded set insert, given the latter is both simpler and avoids the leak?</li>
 </ul>
 
 </body>

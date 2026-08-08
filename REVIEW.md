@@ -1,9 +1,9 @@
 ---
 pr: openshift/sippy#3876
 title: "TRT-2821: Optimize GetJobRunTestsCountByLookback using cumulative summaries"
-head_sha: eeccb8e3c03c0befc5fef5d9eb8da1e91e166156
+head_sha: ae890fbbaf5f72c98471a91400dfafcbd8c567f5
 base: main
-reviewed_at: 2026-08-05T22:40:16Z
+reviewed_at: 2026-08-08T12:04:34Z
 verdict: request-changes
 ---
 
@@ -33,6 +33,30 @@ Verified by hand: the job-run window (`> today-lookbackDays` midnight) and the t
         return -1, -1, err
     }
     ```
+
+### [should-fix] channel/collector-goroutine fan-in is unnecessary indirection
+- where: `pkg/api/tests.go:419-427,457,464-465`
+- concern: the channel plus separate goroutine exists only to merge per-release `[]int64` results into a `sets.Set[int64]`. A `sync.Mutex` guarding `testIDs.Insert(ids...)` called directly inside each `g.Go` closure gives the same result with less code, no channel lifecycle to manage, and removes the leak above entirely (nothing to forget to close). Also more consistent with the simpler errgroup fan-out pattern already used in `pkg/api/job_runs.go`.
+- excerpt: |
+    ch := make(chan []int64, len(releases))
+    testIDs := sets.New[int64]()
+    done := make(chan struct{})
+    go func() {
+        for ids := range ch {
+            testIDs.Insert(ids...)
+        }
+        close(done)
+    }()
+    ...
+    g.Go(func() error {
+        var releaseTestIDs []int64
+        queryErr := dbc.DB.Raw(...).Scan(&releaseTestIDs).Error
+        if queryErr != nil {
+            return fmt.Errorf(...)
+        }
+        ch <- releaseTestIDs
+        return nil
+    })
 
 ### [should-fix] no defensive clamp to MAX(date) before querying date = today
 - where: `pkg/api/tests.go:434-451`
@@ -64,8 +88,10 @@ Verified by hand: the job-run window (`> today-lookbackDays` midnight) and the t
 - Loop variable capture in `g.Go(func() error { ... release ... })` — safe under Go 1.25 (per-iteration loop var semantics), confirmed via `go.mod`.
 - Structured logging (`log.WithField(s)`) used instead of `Infof` string formatting, per project convention.
 - `sets.New[int64]()` used for dedup per project convention (no hand-rolled `map[string]bool`).
+- No BigQuery counterpart exists for `GetJobRunTestsCountByLookback`, so the CLAUDE.md provider-parity rule does not apply here.
 - gofmt/style of new code visually consistent with the rest of the file (could not run `gofmt`/`go vet` directly — toolchain unavailable in this sandbox).
 
 ## Open questions
 - Is there a reason `GetJobRunTestsCountByLookbackAt` doesn't clamp to `MAX(date)` like `ResolveDateRanges` does elsewhere, or is `refreshMaterializedViews`'s post-cumulative-refresh call order considered a sufficient guarantee going forward?
 - Was the goroutine-leak-on-error path noticed during benchmarking, or did all iterations succeed so it never triggered?
+- Any reason to prefer the channel-based fan-in over a mutex-guarded set insert, given the latter is both simpler and avoids the leak?
