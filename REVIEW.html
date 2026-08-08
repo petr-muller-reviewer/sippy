@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3876</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: #f2f2f2;
+    border-radius: 4px;
+  }
+  code { padding: 0.1em 0.35em; font-size: 0.92em; }
+  pre {
+    padding: 0.8em 1em;
+    overflow-x: auto;
+    font-size: 0.88em;
+    border: 1px solid #e0e0e0;
+  }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #333; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.02rem; margin-bottom: 0.3rem; }
+  .meta { background: #f6f6f6; border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+  .meta div { margin: 0.15rem 0; }
+  .meta .label { color: #666; display: inline-block; min-width: 110px; }
+  .verdict-box { border-radius: 6px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  .verdict-request-changes { background: #fff3f0; border: 1px solid #f0b8a8; }
+  .verdict-approve { background: #f0fff4; border: 1px solid #a8e0b8; }
+  .verdict-needs-discussion { background: #fffbf0; border: 1px solid #e0d0a8; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.03em; }
+  .finding { border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .sev { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 3px; margin-right: 0.5em; letter-spacing: 0.03em; }
+  .sev-blocking { background: #ffdcd6; color: #a3231a; }
+  .sev-should-fix { background: #ffe8c2; color: #8a5a00; }
+  .sev-nit { background: #dcecff; color: #1a4d8a; }
+  .sev-question { background: #e8e0ff; color: #4b2c8a; }
+  .loc { color: #666; font-size: 0.88rem; }
+  ul { padding-left: 1.4rem; }
+  a { color: #1a5db8; }
+  .hl { background: #fff2a8; }
+</style>
+</head>
+<body>
+
+<h1>Review of openshift/sippy#3876</h1>
+
+<div class="meta">
+  <div><span class="label">PR</span> <a href="https://github.com/openshift/sippy/pull/3876">openshift/sippy#3876</a></div>
+  <div><span class="label">Title</span> TRT-2821: Optimize GetJobRunTestsCountByLookback using cumulative summaries</div>
+  <div><span class="label">Head SHA</span> <code>eeccb8e3c03c0befc5fef5d9eb8da1e91e166156</code></div>
+  <div><span class="label">Base</span> main</div>
+  <div><span class="label">Reviewed at</span> 2026-08-05T22:40:16Z</div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box verdict-request-changes">
+  <div class="verdict-label">Request changes</div>
+  <p>The performance approach is sound and well-benchmarked, and the date-boundary math (hand-verified) is correct and consistent between the two returned counts. But there's a real goroutine leak on the errgroup error path, and a latent correctness risk from querying <code>date = today</code> in <code>test_cumulative_summaries</code> without the defensive "clamp to latest available date" pattern every other caller in the codebase uses. Neither is a blocker for the happy path, but both should be fixed before merge given this runs on every refresh cycle.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces the single <code>COUNT(DISTINCT)</code> query against <code>prow_job_run_tests</code> (~70M rows, no partition pruning) with two targeted queries.</li>
+  <li>Job-run count now comes from a direct <code>COUNT</code> against <code>prow_job_runs</code> (indexed on timestamp, much smaller table).</li>
+  <li>Test-ID count is computed per-release via a self-join on <code>test_cumulative_summaries</code> (pre-aggregated by <code>test_id</code> before joining), run concurrently across releases (errgroup, concurrency 4) and merged into a dedup set in Go.</li>
+  <li>Refactors the function into <code>GetJobRunTestsCountByLookbackAt(dbc, lookbackDays, today civil.Date)</code> for deterministic testing, with the original name as a thin wrapper.</li>
+  <li>Adds a substantial new integration test suite exercising cross-release dedup, zero/negative delta exclusion, missing prior-day rows, soft-deleted runs, and multi-job aggregation.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">should-fix</span>Goroutine leak when an errgroup release query fails</h3>
+  <div class="loc"><code>pkg/api/tests.go:419-465</code></div>
+  <p><code>ch</code> is only closed on the success path (line 464). If <code>g.Wait()</code> returns an error, the function returns immediately without closing <code>ch</code>. The background collector goroutine (<code>for ids := range ch</code>, lines 421-427) then blocks forever, since the channel is never closed. The buffered channel's capacity equals <code>len(releases)</code>, so non-failing goroutines' sends never block on it — meaning every send from a completed goroutine has already landed by the time <code>g.Wait()</code> returns, and the leak is real, not masked by a deadlock. This function runs on every <code>RefreshData</code> cycle, so a transient per-release failure leaks a goroutine each time.</p>
+  <pre>if err := g.Wait(); err != nil {
+    return -1, -1, err
+}
+close(ch)
+&lt;-done</pre>
+  <p>Fix: close (and drain) before checking the error, e.g. <code>err := g.Wait(); close(ch); &lt;-done; if err != nil { return -1, -1, err }</code>.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">should-fix</span>No defensive clamp to MAX(date) before querying date = today</h3>
+  <div class="loc"><code>pkg/api/tests.go:434-451</code></div>
+  <p>Every other caller that self-joins <code>test_cumulative_summaries</code> (<code>pkg/db/query/cumulative_query.go</code>'s <code>resolvePrefixSumDates</code>, <code>pkg/db/query/feature_gates.go:18-24</code>) first clamps via <code>ResolveDateRanges</code> to the latest available date for the release, because "today"'s cumulative row only exists once <code>cumulativesummary.Refresh</code> completes for the day. This PR queries <span class="hl"><code>date = ?</code></span> with the literal <code>today</code> value, with no such clamp.</p>
+  <pre>WITH end_sums AS (
+  SELECT test_id, SUM(prefix_sum_runs) AS total_runs
+  FROM test_cumulative_summaries
+  WHERE release = ? AND date = ?
+  GROUP BY test_id
+),</pre>
+  <p>It's currently safe only because the sole call site (<code>refreshMaterializedViews</code>, <code>server.go:411</code>) runs strictly after <code>cumulativesummary.Refresh</code> inside <code>RefreshData</code> (<code>server.go:399-411</code>). That ordering is an implicit invariant, not an enforced one — any future caller invoked before the daily refresh completes will silently undercount rather than error.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-nit">nit</span>Confusing variable name <code>startMinusOne</code></h3>
+  <div class="loc"><code>pkg/api/tests.go:391</code></div>
+  <p>It's not "start minus one" — it's "the day before the window's exclusive start boundary" for the prefix-sum delta. Something like <code>windowStartExclusive</code> would read more clearly against the <code>P(End) - P(Start)</code> convention used elsewhere.</p>
+  <pre>startMinusOne := today.AddDays(-lookbackDays - 1)</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-question">question</span>No parity test between the two count windows</h3>
+  <div class="loc"><code>test/integration/lookback_count_test.go</code></div>
+  <p>The new tests cover cross-release dedup, zero/negative delta exclusion, missing prior-day rows, soft-deleted runs, and multi-job aggregation individually, but nothing directly asserts that <code>jobRunsCount</code>'s window and <code>testIDsCount</code>'s window cover the same span (they do, per manual verification — but it's easy to regress silently since the two counts come from separately-computed boundaries).</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Date-boundary math for both counts hand-verified against the <code>P(End-1) - P(Start-1)</code> convention in <code>cumulative_query.go</code> — consistent, no off-by-one between the job-run and test-ID windows (both resolve to a <code>lookbackDays+1</code>-day span).</li>
+  <li><code>prow_job_runs</code> soft-delete: using <code>.Table()</code> bypasses GORM's automatic scope, so the explicit <code>deleted_at IS NULL</code> clause is required and correct; covered by <code>TestLookbackCount_JobRunsCountExcludesDeleted</code>.</li>
+  <li>SQL injection: <code>release</code> values are parameterized bind params sourced from <code>release_definitions</code>, not user input.</li>
+  <li>Loop variable capture in <code>g.Go(func() error { ... release ... })</code> — safe under Go 1.25 per-iteration loop var semantics (confirmed via <code>go.mod</code>).</li>
+  <li>Structured logging (<code>log.WithField(s)</code>) used instead of <code>Infof</code> string formatting, per project convention.</li>
+  <li><code>sets.New[int64]()</code> used for dedup per project convention (no hand-rolled <code>map[string]bool</code>).</li>
+  <li>gofmt/style of new code visually consistent with the rest of the file (could not run <code>gofmt</code>/<code>go vet</code> directly — toolchain unavailable in this sandbox).</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is there a reason <code>GetJobRunTestsCountByLookbackAt</code> doesn't clamp to <code>MAX(date)</code> like <code>ResolveDateRanges</code> does elsewhere, or is <code>refreshMaterializedViews</code>'s post-cumulative-refresh call order considered a sufficient guarantee going forward?</li>
+  <li>Was the goroutine-leak-on-error path noticed during benchmarking, or did all iterations succeed so it never triggered?</li>
+</ul>
+
+</body>
+</html>
