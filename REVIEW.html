@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3860</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; color: #1a1a1a; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  header { border-bottom: 2px solid #333; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: 8rem 1fr; gap: 0.25rem 1rem; margin: 0.5rem 0; }
+  header dt { font-weight: 600; color: #555; }
+  .verdict { background: #eaf6ea; border-left: 4px solid #2e7d32; padding: 1rem 1.25rem; margin: 1.5rem 0; border-radius: 4px; }
+  .verdict h2 { margin-top: 0; }
+  h2 { border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-top: 2.5rem; }
+  .finding { border: 1px solid #ddd; border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .finding h3 { margin-top: 0; }
+  .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; padding: 0.15rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
+  .badge.blocking { background: #fdecea; color: #c62828; }
+  .badge.should-fix { background: #fff4e5; color: #e65100; }
+  .badge.nit { background: #eef2f7; color: #37474f; }
+  .badge.question { background: #ede7f6; color: #4527a0; }
+  .loc { color: #555; font-size: 0.9rem; }
+  pre.excerpt { background: #f6f8fa; padding: 0.75rem 1rem; border-radius: 4px; overflow-x: auto; }
+  ul.checklist li { margin: 0.35rem 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: Add OSD GCP operator e2e and HyperShift CI to ROSA releases</h1>
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3860">openshift/sippy#3860</a></dd>
+    <dt>Head SHA</dt><dd><code>20313de85b942456d280438cd47ab023ddeb4add</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-03T20:48:00Z</dd>
+  </dl>
+</header>
+
+<div class="verdict">
+  <h2>Verdict: Approve</h2>
+  <p>Small, well-scoped, config-only change that follows the file's existing conventions closely. The regexp widening is intentional and tightly enough scoped that it shouldn't cause false-positive job matches. No blocking issues found.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Widens the "SRE operator e2e tests via Prow" regexp in <code>rosa-stage</code> and <code>rosa-integration</code> from matching only <code>-master-rosa-sts-e2e-promotion-(stage|int)</code> to matching <code>-(master|main)-(rosa-sts|osd-gcp)-e2e-promotion-(stage|int)</code>.</li>
+  <li>This picks up 5 new OSD GCP operator jobs (RMO, CAMO, MUO, OAO, SFO) and fixes AVO, which branches off <code>main</code> rather than <code>master</code> and was previously excluded entirely.</li>
+  <li>Adds a new regexp line to both releases for HyperShift CI sector tests (staging and integration variants).</li>
+  <li>Updates the accompanying comments to say "(STS + GCP)" so the widened scope is documented, not silent.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="badge question">Question</span>No <code>rosa-production</code> equivalent added</h3>
+  <p class="loc"><code>config/openshift-customizations.yaml:101-110</code></p>
+  <pre class="excerpt">rosa-production:
+  synthetic: true
+  ...
+  regexp:
+    # OCM FVT production
+    - "^periodic-ci-openshift-online-rosa-e2e-main-ocm-fvt-.*-production-.*"</pre>
+  <p>Neither the OSD GCP operator regex nor the HyperShift CI regex got a <code>rosa-production</code> counterpart. This isn't a regression &mdash; there was no <code>-prod</code> variant of the operator-promotion regex before this PR either &mdash; but it's worth confirming with the author whether GCP-operator/HyperShift production jobs exist and are intentionally left out of scope.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checklist">
+  <li>Anchoring (<code>^</code> / <code>$</code>) preserved correctly on both modified SRE operator regexp lines.</li>
+  <li>Comment updates ("STS + GCP") accurately reflect the widened match scope &mdash; no silent behavior change.</li>
+  <li>The new HyperShift regexp's unanchored trailing <code>.*</code> matches existing style in the same block (e.g. the <code>ocm-fvt-.*-staging-.*</code> line).</li>
+  <li>Widening <code>master</code> &rarr; <code>(master|main)</code> is scoped tightly enough (combined with <code>rosa-sts</code>/<code>osd-gcp</code> and <code>e2e-promotion-(int|stage)</code>) that accidental overbroad matches across unrelated jobs are unlikely.</li>
+  <li>No test coverage exists or is expected here &mdash; this is runtime-loaded YAML with no schema/regex tests in the repo, consistent with prior commits that touched only this file.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Are there production-environment equivalents of the OSD GCP operator or HyperShift CI jobs that should eventually be added to <code>rosa-production</code>, or are those environments genuinely not applicable to this job set?</li>
+</ul>
+
+</body>
+</html>
