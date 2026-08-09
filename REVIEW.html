@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3871</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table { border-collapse: collapse; }
+  header td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+  header td.k { color: #666; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.3rem 0; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .verdict {
+    display: inline-block;
+    padding: 0.3rem 0.9rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .verdict.approve { background: #e6f4ea; color: #1e7e34; }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.should-fix { border-left-color: #e8a33d; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1.02rem; }
+  .sev-tag {
+    display: inline-block;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.1em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    vertical-align: middle;
+  }
+  .sev-tag.should-fix { background: #fbe9d2; color: #8a5a17; }
+  ul { padding-left: 1.3rem; }
+  li { margin-bottom: 0.4rem; }
+  a { color: #0b57d0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review of openshift/sippy#3871</h1>
+  <table>
+    <tr><td class="k">Title</td><td>Port feature gate promotion logic from o/api to sippy</td></tr>
+    <tr><td class="k">Head SHA</td><td><code class="inline">0ff0c810357220fcf3d8fb1ac95f198d7fd58a62</code></td></tr>
+    <tr><td class="k">Base</td><td><code class="inline">main</code></td></tr>
+    <tr><td class="k">Reviewed</td><td>2026-08-08T13:23:43Z</td></tr>
+    <tr><td class="k">Link</td><td><a href="https://github.com/openshift/sippy/pull/3871">github.com/openshift/sippy/pull/3871</a></td></tr>
+  </table>
+</header>
+
+<section>
+  <h2>Verdict</h2>
+  <p><span class="verdict approve">Approve</span></p>
+  <p>Small, well-formed port of feature-gate promotion logic. The filters used to build HATEOAS
+  links and the SQL used to actually compute promotion data are kept consistent (including a
+  new <code class="inline">lifecycle = 'blocking'</code> restriction applied identically on both
+  sides), there's no BigQuery parity concern since this subsystem is Postgres-only, and docs were
+  updated in the same PR. One structural risk is worth a comment but doesn't block merge.</p>
+</section>
+
+<section>
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Adds <code class="inline">pkg/api/featuregatepromotion/</code>: canonical filter
+      definitions (<code class="inline">GateTestFilter</code>, <code class="inline">InstallTestFilter</code>,
+      <code class="inline">CapabilityRegressionsFilter</code>) plus <code class="inline">promotion.go</code>,
+      which computes promotion readiness (per-variant pass rates, sufficiency, warnings/errors).</li>
+    <li>Wires the same filter definitions into <code class="inline">pkg/sippyserver/server.go</code>
+      so HATEOAS links (<code class="inline">gate_tests</code>, <code class="inline">install_tests</code>,
+      <code class="inline">gate_job_tests</code>) point at exactly the data used for promotion evaluation.</li>
+    <li>Adds new endpoints: <code class="inline">/api/feature_gates</code> (list) and
+      <code class="inline">/api/feature_gates/{feature_gate}</code> (detail, including the new
+      <code class="inline">promotion</code> object).</li>
+    <li>Restricts capability-regression detection to <code class="inline">lifecycle = 'blocking'</code>
+      tests, applied both in the declarative filter and the raw SQL query.</li>
+    <li>Updates <code class="inline">pkg/api/README.md</code> and adds seed-data fixtures
+      (<code class="inline">cmd/sippy/seed_data.go</code>) exercising the new capability-regression path.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Findings</h2>
+
+  <div class="finding should-fix">
+    <h3><span class="sev-tag should-fix">Should fix</span>Capability-regression criteria defined twice, must be kept in lockstep</h3>
+    <p><code class="inline">pkg/api/featuregatepromotion/filters.go:38-53</code>,
+       <code class="inline">pkg/api/featuregatepromotion/promotion.go:216</code></p>
+    <p>The set of tests counted as "capability regressions" is defined twice: once declaratively
+    as <code class="inline">CapabilityRegressionsFilter</code> (used only to build the
+    <code class="inline">gate_job_tests</code> HATEOAS link) and once as hand-written raw SQL in
+    <code class="inline">getCapabilityRegressions</code> (used to actually compute regressions for
+    promotion evaluation). Both currently encode the same conditions independently &mdash;
+    <span style="background:#fff3b0">lifecycle=blocking</span>, working% &lt; 92, runs &ge; 1,
+    excluded test-name substrings.</p>
+    <pre>// filters.go — declarative filter, used only for the HATEOAS link
+func CapabilityRegressionsFilter(featureGate string) filter.Filter {
+	return filter.Filter{
+		Items: []filter.FilterItem{
+			{Field: "lifecycle", Operator: filter.OperatorEquals, Value: "blocking"},
+			{Field: "current_working_percentage", Operator: filter.OperatorArithmeticLessThan, Value: "92"},
+			...
+		},
+	}
+}
+
+-- promotion.go — raw SQL, actually computes regressions
+AND e.lifecycle = 'blocking'
+AND t.name NOT LIKE '%' || ? || '%'
+...
+HAVING ... &lt; 92</pre>
+    <p>A future change to one side (e.g. adjusting the pass-rate threshold or excluded-name list)
+    that misses the other will silently desync the advertised link from what actually gates
+    promotion. Not blocking &mdash; the PR itself demonstrates the two were updated together
+    correctly &mdash; but worth flagging for future maintainers.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li><code class="inline">lifecycle</code> is a pre-existing, well-supported filter field
+      (<code class="inline">pkg/api/tests.go:463</code>), backed by a real
+      <code class="inline">lifecycle text NOT NULL DEFAULT 'blocking'</code> column
+      (<code class="inline">pkg/db/models/prow.go</code>).</li>
+    <li>No BigQuery parity gap: <code class="inline">featuregatepromotion</code> is Postgres-only;
+      the HATEOAS link it feeds always resolves through <code class="inline">/api/tests</code> &rarr;
+      <code class="inline">jsonTestsReportFromDB</code> (Postgres), never the BigQuery-backed
+      <code class="inline">/api/tests/v2</code> route, so the BQ "lifecycle filter unsupported"
+      guard is never hit here.</li>
+    <li><code class="inline">e.lifecycle = 'blocking'</code> in the raw SQL join
+      (<code class="inline">promotion.go:216</code>) is unambiguous &mdash; only one
+      <code class="inline">e</code>-aliased table in scope &mdash; and correctly narrows both
+      sides of the existing self-join on <code class="inline">s.lifecycle = e.lifecycle</code>.</li>
+    <li><code class="inline">pkg/api/README.md</code> updated in the same PR to document the new
+      endpoints and the shared-filter design intent.</li>
+    <li>Full line-by-line diff scan across all changed/added files, cross-file tracing of
+      <code class="inline">CapabilityRegressionsFilter</code> / <code class="inline">getCapabilityRegressions</code>
+      callers, and an independent verification pass; no other correctness, parity, or convention
+      issues found.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Open questions for the author</h2>
+  <ul>
+    <li>Would it be worth extracting the capability-regression predicate (lifecycle, threshold,
+      excluded-name list) into a single source of truth consumed by both the
+      <code class="inline">filter.Filter</code> and the SQL builder, so future criteria changes
+      can't update one path without the other?</li>
+  </ul>
+</section>
+
+</body>
+</html>
