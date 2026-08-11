@@ -1,10 +1,14 @@
 ---
 pr: openshift/sippy#3864
-title: "OCPMCP-308: Add mcpchecker JUnit suite to Sippy allowlist"
+title: "TRT-2893: Add mcpchecker JUnit suite to Sippy allowlist"
 head_sha: 1be1421c3c8d8fc6975a2e5bead58e24d9af53c6
 base: main
-reviewed_at: 2026-08-08T13:41:57Z
+reviewed_at: 2026-08-11T10:55:23Z
 verdict: approve
+refresh_log:
+  - from: 1be1421c3c8d8fc6975a2e5bead58e24d9af53c6
+    to: 1be1421c3c8d8fc6975a2e5bead58e24d9af53c6
+    summary: No code changes. PR title/Jira reference changed from OCPMCP-308 to TRT-2893; openshift-ci-robot posted a jira-lifecycle-plugin comment flagging the referenced Jira issue (TRT-2893) has no target version set for the "5.0.0" branch target.
 ---
 
 ## What this PR does
@@ -33,3 +37,4 @@ verdict: approve
 
 ## Open questions
 - Has the actual mcpchecker JUnit output been confirmed to use suite name `mcpchecker` exactly (case/spelling), e.g. via a real job run or local `mcpchecker result convert junit` invocation?
+- The Jira bot flagged that TRT-2893 has no target version set for the "5.0.0" branch target — is that a blocker for merge or just a Jira hygiene item to fix separately?
