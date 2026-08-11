@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3894</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+  }
+  code.inline {
+    background: #f0f0f0;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+  }
+  header {
+    border-bottom: 2px solid #eee;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.2rem 1rem;
+    margin: 0.5rem 0 0 0;
+  }
+  header dt { font-weight: 600; color: #555; }
+  header dd { margin: 0; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3rem;
+  }
+  .verdict-badge {
+    display: inline-block;
+    padding: 0.25rem 0.7rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    background: #fff3cd;
+    color: #7a5b00;
+    border: 1px solid #ffe08a;
+  }
+  .finding {
+    border: 1px solid #e5e5e5;
+    border-left: 4px solid #d9a300;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+    background: #fffefb;
+  }
+  .finding.blocking { border-left-color: #c0392b; }
+  .finding.should-fix { border-left-color: #d9a300; }
+  .finding.nit { border-left-color: #888; }
+  .finding.question { border-left-color: #2e7d9e; }
+  .finding-title { font-weight: 600; margin-bottom: 0.3rem; }
+  .sev-tag {
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .sev-should-fix { background: #fff3cd; color: #7a5b00; }
+  .sev-nit { background: #eee; color: #555; }
+  .sev-question { background: #dbeef5; color: #235; }
+  .hl { background: #ffe9a8; }
+  ul.tight li { margin-bottom: 0.4rem; }
+  a { color: #1a5fb4; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review of openshift/sippy#3894</h1>
+  <dl>
+    <dt>Title</dt><dd>Add GCD (Google Dedicated Cloud) Variant</dd>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3894">github.com/openshift/sippy/pull/3894</a></dd>
+    <dt>Head SHA</dt><dd><code class="inline">37b8bf28261a5f1dd4eaf13d8e52d081c363a166</code></dd>
+    <dt>Base branch</dt><dd><code class="inline">main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-11T08:42:45Z</dd>
+  </dl>
+</header>
+
+<h2>Verdict <span class="verdict-badge">Request changes</span></h2>
+<p>The change is a single line and directionally correct &mdash; it adds a new platform-detection entry in the right place in the ordered table &mdash; but the new pattern's matching semantics are inconsistent with every sibling entry (it requires a trailing dash where none of the others do), and there's no test covering it. Both are small, quick fixes.</p>
+
+<h2>What this PR does</h2>
+<ul class="tight">
+  <li>Adds a new entry <code class="inline">{"-gcd-", "gcd"}</code> to the <code class="inline">platformPatterns</code> table inside <code class="inline">setPlatform</code> in <code class="inline">pkg/variantregistry/ocp.go</code>.</li>
+  <li>Placed correctly before the generic <code class="inline">-gcp</code> pattern so GCD jobs aren't misclassified as plain GCP.</li>
+  <li>Introduces the platform variant value <code class="inline">gcd</code> for OpenShift jobs running on Google's sovereign/dedicated cloud offering.</li>
+  <li>No other files touched &mdash; not the SQL job-name filters, not the test suite, not docs.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <div class="finding-title"><span class="sev-tag sev-should-fix">should-fix</span>Pattern requires a trailing dash unlike every sibling entry</div>
+  <p><code class="inline">pkg/variantregistry/ocp.go:1145</code></p>
+  <pre>{"-osd-ccs-gcp", "osd-gcp"},
+<span class="hl">{"-gcd-", "gcd"},</span>
+{"-gcp", "gcp"},</pre>
+  <p>Matching is done via <code class="inline">strings.Contains(jobNameLower, entry.substring)</code> (line 1163). Every other pattern in this table (<code class="inline">-gcp</code>, <code class="inline">-aws</code>, <code class="inline">-azure</code>, <code class="inline">-osd-ccs-gcp</code>, ...) is a bare leading-dash substring that matches regardless of what follows. This new entry requires both a leading <em>and</em> trailing dash, so a job name ending in <code class="inline">...-gcd</code> (no further suffix) would not match, silently falling through to "unable to determine platform" instead of classifying as <code class="inline">gcd</code>.</p>
+</div>
+
+<div class="finding should-fix">
+  <div class="finding-title"><span class="sev-tag sev-should-fix">should-fix</span>No test coverage for the new pattern</div>
+  <p><code class="inline">pkg/variantregistry/ocp_test.go</code></p>
+  <pre>job: "periodic-ci-openshift-release-master-nightly-4.19-e2e-osd-ccs-gcp",</pre>
+  <p><code class="inline">TestVariantSyncer</code>'s table has a case for every other platform pattern (e.g. the <code class="inline">osd-ccs-gcp</code> case above, at line 279), but none was added for <code class="inline">gcd</code>. Without one, the trailing-dash issue above &mdash; or any future reordering of the pattern table &mdash; would go undetected.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="tight">
+  <li>Placement in <code class="inline">platformPatterns</code>: correctly ordered before the generic <code class="inline">-gcp</code> entry, so GCD jobs won't be misclassified as plain GCP first.</li>
+  <li>Confirmed the matching mechanism (<code class="inline">strings.Contains</code>) by reading <code class="inline">ocp.go:1163</code> directly.</li>
+  <li>Verified this really is a one-line diff by diffing against the true PR base (<code class="inline">fda66a324</code>) &mdash; no other files under <code class="inline">pkg/variantregistry/</code> changed.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul class="tight">
+  <li>What do real GCD prow job names look like &mdash; does <code class="inline">-gcd-</code> ever appear as the final path segment (i.e. nothing after it but the end of the string)? If not, the trailing-dash requirement is harmless in practice, but it's still inconsistent with every sibling pattern here &mdash; worth confirming that's intentional rather than incidental.</li>
+</ul>
+
+</body>
+</html>
