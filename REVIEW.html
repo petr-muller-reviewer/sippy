@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3858</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; background: #fafafa; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  header { border-bottom: 2px solid #ddd; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.5rem 0; }
+  header dt { font-weight: 600; color: #555; }
+  .verdict { background: #e6f4ea; border: 1px solid #34a853; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .verdict.approve { background: #e6f4ea; border-color: #34a853; }
+  h2 { border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .finding { border-left: 4px solid #ccc; padding: 0.5rem 1rem; margin: 1rem 0; background: #fff; }
+  .finding.blocking { border-color: #d93025; }
+  .finding.should-fix { border-color: #f9ab00; }
+  .finding.nit { border-color: #9aa0a6; }
+  .finding.question { border-color: #1a73e8; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .loc { font-size: 0.85rem; color: #666; }
+  ul { padding-left: 1.4rem; }
+  a { color: #1a73e8; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: TRT-2821: Remove backfill-pr-status command</h1>
+  <dl>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3858">openshift/sippy#3858</a></dd>
+    <dt>Base</dt><dd>main</dd>
+    <dt>Head SHA</dt><dd><code>33ec3a24d7e6d2034f2327b219120e42aa70a302</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-03T23:48:52Z</dd>
+  </dl>
+</header>
+
+<div class="verdict approve">
+  <strong>Verdict: Approve.</strong>
+  <p>Clean, well-scoped deletion of a completed one-time backfill command. Verified no dead code, orphaned helpers, or stale references remain, and the regular sync path is untouched.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Deletes <code>cmd/sippy/backfill_pr_status.go</code> (the <code>backfill-pr-status</code> CLI command and its flags/wiring).</li>
+  <li>Removes the command's registration from <code>cmd/sippy/main.go</code>.</li>
+  <li>Deletes the <code>Backfill()</code> method from <code>PRMergeSyncLoader</code> in <code>pkg/dataloader/prmergesyncloader/prmergesyncloader.go</code>.</li>
+  <li>Leaves the regular <code>Load()</code>/<code>sync()</code> path completely unchanged.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>None. No blocking, should-fix, nit, or question-level findings.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>No dead code left behind: <code>mergedPR</code>, <code>flushMergedPRs</code>, <code>unmatchedPRs()</code>, the <code>time</code> import, and <code>IsWithinRateLimitThreshold()</code> are all still used by the retained <code>sync()</code>.</li>
+  <li><code>GetPREntry</code> (the only other caller of the removed <code>Backfill</code>) is still used in <code>github.go</code> and <code>ghcommenter.go</code> &mdash; not orphaned.</li>
+  <li>No leftover references to <code>backfill-pr-status</code>, <code>NewBackfillPRStatusCommand</code>, or this loader's <code>Backfill(</code> anywhere in the repo, including docs.</li>
+  <li>No test files existed for the removed method, so nothing to clean up there.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<p>None.</p>
+
+</body>
+</html>
