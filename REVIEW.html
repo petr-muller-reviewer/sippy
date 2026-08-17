@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3902</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; background: #fff; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  header { border-bottom: 2px solid #333; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header h1 { font-size: 1.4rem; margin: 0 0 .5rem 0; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 1rem; font-size: 0.92rem; color: #444; }
+  header dt { font-weight: 600; }
+  header a { color: #0969da; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: .3rem; margin-top: 2.2rem; }
+  .verdict-badge { display: inline-block; padding: .25rem .7rem; border-radius: 5px; font-weight: 700; font-size: .85rem; text-transform: uppercase; letter-spacing: .03em; }
+  .verdict-request-changes { background: #ffebe9; color: #b0281a; border: 1px solid #f2a9a3; }
+  .finding { border: 1px solid #ddd; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  .finding h3 { margin: 0 0 .4rem 0; font-size: 1.02rem; }
+  .sev { display: inline-block; padding: .1rem .55rem; border-radius: 4px; font-size: .72rem; font-weight: 700; text-transform: uppercase; margin-right: .5rem; vertical-align: middle; }
+  .sev-blocking { background: #ffebe9; color: #b0281a; }
+  .sev-should-fix { background: #fff5cc; color: #7a5b00; }
+  .sev-nit { background: #eef1f4; color: #57606a; }
+  .loc { display: block; font-size: .85rem; color: #57606a; margin-bottom: .6rem; }
+  pre.excerpt { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: .8rem 1rem; overflow-x: auto; font-size: .85rem; margin: .6rem 0; }
+  .hl { background: #fff2a8; }
+  ul.compact li { margin-bottom: .4rem; }
+  .qbox { background: #f6f8fa; border-left: 3px solid #57606a; padding: .5rem 1rem; margin-bottom: .6rem; font-style: italic; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3902</h1>
+  <dl>
+    <dt>Title</dt><dd>TRT-2867: Move /api/jobs/runs/reevaluate to async workflow via sippy-daemon</dd>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3902">github.com/openshift/sippy/pull/3902</a></dd>
+    <dt>Head SHA</dt><dd><code>bd2a6ff45aac01c5e93c5338fee315756e82b416</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-17T22:08:28Z</dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p><span class="verdict-badge verdict-request-changes">Request changes</span></p>
+<p>The async architecture (River + batch tracking + status polling) is sound and reasonably tested, but the core execution path is broken: the daemon-side <code>ReEvaluator</code> used by the River worker never has its symptom cache populated, so every async re-evaluation job will fail with <code>"symptom cache not initialized"</code>. That's a functional showstopper that must be fixed before merge; the remaining findings are real but lower severity.</p>
+
+<h2>What this PR does</h2>
+<ul class="compact">
+  <li>Moves <code>POST /api/jobs/runs/reevaluate</code> from synchronous execution to an async batch workflow — non-dry-run requests are enqueued as River (Postgres-backed queue) jobs processed by sippy-daemon.</li>
+  <li>Adds <code>pkg/sippyserver/workqueue</code> (Submitter, StatusQuerier) plus a migration for <code>workqueue_batches</code>/<code>workqueue_batch_items</code> to track batch/item state against River job rows.</li>
+  <li>Wires a River worker (<code>ReevaluateWorker</code>) into sippy-daemon that delegates to the existing <code>jobrunscan.ReEvaluator.reEvaluateOne</code> logic.</li>
+  <li>Adds <code>GET /api/jobs/runs/reevaluate/{batch_id}</code> for polling batch status (counts + per-item state).</li>
+  <li><code>dry_run</code> requests keep the old synchronous path, otherwise unchanged.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+<div class="finding">
+  <h3><span class="sev sev-blocking">Blocking</span>async ReEvaluator's symptom cache is never populated in sippy-daemon</h3>
+  <span class="loc"><code>cmd/sippy-daemon/main.go:202</code>, <code>pkg/api/jobrunscan/reevaluate_worker.go:52-60</code></span>
+  <p><code>setupRiverProcess()</code> constructs <code>evaluator := jobrunscan.NewReEvaluator(...)</code> and registers <code>NewReevaluateWorker(evaluator)</code>, but nothing ever calls <code>evaluator.RefreshSymptomCache()</code> on it. <code>RefreshSymptomCache()</code> is only invoked on a separate, short-lived <code>ReEvaluator</code> created in <code>reEvaluateAsync</code> just to compute a dedup hash, then discarded. <code>ReevaluateWorker.Work</code> calls <code>w.evaluator.CachedSymptoms()</code>, which is <code>nil</code> on the daemon's evaluator — every job fails with <code>"symptom cache not initialized"</code>, and after <code>MaxAttempts=3</code> the whole batch ends up failed/discarded. As wired, no async re-evaluation job can ever succeed.</p>
+  <pre class="excerpt">// cmd/sippy-daemon/main.go
+evaluator := jobrunscan.NewReEvaluator(bqClient, gcsClient, f.GoogleCloudFlags.StorageBucket, dbc, cacheClient, artifactMgr, false)
+workers := river.NewWorkers()
+river.AddWorker(workers, jobrunscan.NewReevaluateWorker(evaluator))
+<span class="hl">// no RefreshSymptomCache() call anywhere on `evaluator`</span>
+
+// pkg/api/jobrunscan/reevaluate_worker.go
+func (w *ReevaluateWorker) Work(ctx context.Context, job *river.Job[ReevaluateJobRunArgs]) error {
+    symptoms := w.evaluator.CachedSymptoms()
+    <span class="hl">if symptoms == nil {
+        return fmt.Errorf("symptom cache not initialized")
+    }</span></pre>
+</div>
+
+<h3>Should fix</h3>
+<div class="finding">
+  <h3><span class="sev sev-should-fix">Should fix</span>async path skips per-ID validation</h3>
+  <span class="loc"><code>pkg/sippyserver/job_run_scan.go:223-236</code></span>
+  <p><code>reEvaluateSynchronous</code> calls <code>apijobrunscan.ValidateReEvalRequest(buildIDs)</code> before doing any work. <code>reEvaluateAsync</code> only checks the batch is non-empty and under <code>MaxJobRunsPerBatch</code> — it never validates individual build IDs. A non-numeric ID is accepted, enqueued as a River job, and only fails later inside the worker/BigQuery query, burning a queue slot and surfacing as an opaque per-item failure instead of an immediate 400.</p>
+  <pre class="excerpt">if len(buildIDs) == 0 {
+    failureResponse(w, http.StatusBadRequest, "prow_job_build_ids is required")
+    return
+}
+if len(buildIDs) > apijobrunscan.MaxJobRunsPerBatch {
+    failureResponse(w, http.StatusBadRequest, fmt.Sprintf("maximum %d job runs per batch", apijobrunscan.MaxJobRunsPerBatch))
+    return
+}
+<span class="hl">// no ValidateReEvalRequest(buildIDs) call here</span></pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev sev-should-fix">Should fix</span>buildBatchItems pairs River job IDs to item keys purely by array index</h3>
+  <span class="loc"><code>pkg/sippyserver/workqueue/submitter.go:56, 73, 105-115</code></span>
+  <p><code>s.riverClient.InsertMany(ctx, items)</code> returns results that <code>buildBatchItems</code> zips against <code>itemKeys</code> by position. This assumes River's underlying bulk <code>INSERT ... SELECT FROM unnest(...) ... ON CONFLICT ... RETURNING</code> (no <code>ORDER BY</code>) preserves input order in its output — true today for the vendored implementation, but an implicit contract on an unordered SQL statement rather than something the River client documents or enforces. If it doesn't hold, a batch item silently reports the wrong build's re-evaluation state.</p>
+  <pre class="excerpt">func buildBatchItems(batchID uuid.UUID, results []*rivertype.JobInsertResult, itemKeys []string) []BatchItem {
+    items := make([]BatchItem, len(results))
+    for i, r := range results {
+        items[i] = BatchItem{
+            BatchID:    batchID,
+            RiverJobID: r.Job.ID,
+            <span class="hl">ItemKey:    itemKeys[i],</span>
+        }
+    }
+    return items
+}</pre>
+</div>
+
+<h3>Nits</h3>
+<div class="finding">
+  <h3><span class="sev sev-nit">Nit</span>batch status response has no HATEOAS links</h3>
+  <span class="loc"><code>pkg/sippyserver/workqueue/status.go:21-30</code>, <code>pkg/sippyserver/job_run_scan.go:264-288</code></span>
+  <p>Project convention requires HATEOAS in API responses. The sync re-eval response is annotated via <code>InjectReEvalHATEOASLinks</code>, and the batch-submit response includes a manual <code>links.status</code>, but <code>jsonReEvaluateBatchStatus</code> returns the raw <code>BatchStatusResponse</code> with no <code>links</code> field — a client polling status has no self/related links.</p>
+  <pre class="excerpt">type BatchStatusResponse struct {
+    BatchID   uuid.UUID    `json:"batch_id"`
+    Status    BatchStatus  `json:"status"`
+    Total     int          `json:"total"`
+    Completed int          `json:"completed"`
+    Failed    int          `json:"failed"`
+    Running   int          `json:"running"`
+    Pending   int          `json:"pending"`
+    Items     []ItemStatus `json:"items"`
+    <span class="hl">// no links field</span>
+}</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="compact">
+  <li>dry_run path (<code>reEvaluateSynchronous</code>) is unchanged and still validates input and injects HATEOAS links.</li>
+  <li><code>Submitter.Submit</code> correctly enqueues River jobs before creating batch/item tracking rows, with a documented harmless-orphan-jobs failure mode if the transaction fails.</li>
+  <li>River job uniqueness (<code>ByArgs</code> + <code>ByPeriod</code> via <code>ProwJobBuildID</code>+<code>SymptomHash</code>) looks sound for dedup semantics.</li>
+  <li>Migration for <code>workqueue_batches</code>/<code>workqueue_batch_items</code> not reviewed for schema-level issues beyond existence.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<div class="qbox">How was the async path tested end-to-end, given <code>evaluator.RefreshSymptomCache()</code> is never invoked on the daemon's <code>ReEvaluator</code>? Did any test exercise <code>ReevaluateWorker.Work</code> against a live symptom cache, or only in isolation with a pre-populated cache?</div>
+<div class="qbox">Is the per-index pairing in <code>buildBatchItems</code> guaranteed by River's <code>InsertMany</code> API contract, or would it be safer to key off something returned per-item instead of relying on SQL fetch order?</div>
+
+</body>
+</html>
