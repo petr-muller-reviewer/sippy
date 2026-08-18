@@ -95,10 +95,11 @@
   <dl>
     <dt>Title</dt><dd>Trt 2709 partitioning phase2 query partitioning</dd>
     <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3907" target="_blank">github.com/openshift/sippy/pull/3907</a></dd>
-    <dt>Head SHA</dt><dd><code>63c97d78939add0e89432350b2fd1035b0cb6d32</code></dd>
+    <dt>Head SHA</dt><dd><code>f96c187ae48296b024af4503528ef867612ee99c</code></dd>
     <dt>Base</dt><dd><code>main</code></dd>
-    <dt>Reviewed at</dt><dd><code>2026-08-17T15:05:35Z</code></dd>
+    <dt>Reviewed at</dt><dd><code>2026-08-18T15:05:10Z</code></dd>
   </dl>
+  <p style="font-size:0.85rem;color:#666;margin-top:0.75rem;">Refreshed from <code>63c97d78</code> &rarr; <code>f96c187a</code>: 2 commits fixing integration tests flagged in review comments. See "Since previous review" below.</p>
 </header>
 
 <div class="verdict">
@@ -112,6 +113,14 @@
   <li>Replaces an unbounded run-count lookup (<code>ProwJobRunIDs</code>) with a new <code>ProwJobRunCount</code> that counts within a fixed recent window.</li>
   <li>Narrows the <code>job_results</code> SQL function's last-pass computation to the reporting window instead of the whole release history.</li>
   <li>Scopes a job-run count metric to the current active release, pulled via a new <code>CurrentActiveRelease</code> helper.</li>
+</ul>
+
+<p><strong>Since previous review</strong> (<code>63c97d78</code> &rarr; <code>f96c187a</code>): mstaeble flagged integration test failures in review comments (2026-08-18); author pushed 2 commits to fix them.</p>
+<ul class="plain">
+  <li><code>ProwJobRunCount</code> and <code>HasBuildClusterData</code> now take an explicit <code>since time.Time</code> instead of hardcoding the interval inline &mdash; call sites still pass <code>time.Now().Add(-14*24*time.Hour)</code>, so effective behavior is unchanged.</li>
+  <li><code>CurrentActiveRelease</code> now returns an error instead of <code>("", nil)</code> when <code>release_definitions</code> has no match.</li>
+  <li><code>LookupProwJobRunPartitionKeys</code> now returns <code>gorm.ErrRecordNotFound</code> on a missing row instead of a zero-value struct.</li>
+  <li>Integration tests updated to match; CI (<code>/test e2e</code>) now passes. PR is still open.</li>
 </ul>
 
 <h2>Findings</h2>
@@ -130,18 +139,21 @@
 
 <div class="finding">
   <h3><span class="badge blocking">Blocking</span>ProwJobRunCount hardcoded 14-day window breaks fallback threshold</h3>
-  <p><code class="loc">pkg/db/query/job_queries.go:69-78</code> &amp; <code class="loc">pkg/api/job_runs.go:582</code></p>
-  <pre>func ProwJobRunCount(dbc *db.DB, prowJobID uint, release string) (int, error) {
+  <p><code class="loc">pkg/db/query/job_queries.go:69-78</code> &amp; <code class="loc">pkg/api/job_runs.go:583</code></p>
+  <p style="font-size:0.85rem;color:#8a6d00;"><strong>Status as of f96c187a: unresolved.</strong> Refactored to accept a <code>since time.Time</code> param (commit a6f4b5a77, improves testability), but the only call site still passes <code>time.Now().Add(-14*24*time.Hour)</code> &mdash; effective query window is unchanged.</p>
+  <pre>func ProwJobRunCount(dbc *db.DB, prowJobID uint, release string, since time.Time) (int, error) {
 	var count int64
 	q := dbc.DB.Table("prow_job_runs").
 		Where("prow_job_id = ?", prowJobID).
 		Where("prow_job_release = ?", release).
-		<span class="hl">Where("timestamp > NOW() - INTERVAL '14 days'")</span>
+		Where("timestamp > ?", since)
 
-// pkg/api/job_runs.go
+// pkg/api/job_runs.go:583
+<span class="hl">runCount, err := query.ProwJobRunCount(dbc, job.ID, compareRelease, time.Now().Add(-14*24*time.Hour))</span>
+...
 <span class="hl">if totalJobRuns < 20 {</span>
     // falls back to comparing against the prior release</pre>
-  <p><code>ProwJobRunCount</code> replaces a previously all-time count (<code>ProwJobRunIDs</code>) with one hardcoded to the last 14 days. Its summed result feeds a <code>totalJobRuns &lt; 20</code> check in <code>findReleaseMatchJobNames</code> that triggers a fallback to the prior release. A job with hundreds of historical runs but fewer than 20 in the last 14 days will now spuriously look data-starved and trigger that fallback &mdash; a behavior change unrelated to partition pruning.</p>
+  <p><code>ProwJobRunCount</code> is still effectively scoped to the last 14 days (previously an all-time count via <code>ProwJobRunIDs</code>). Its summed result feeds a <code>totalJobRuns &lt; 20</code> check in <code>findReleaseMatchJobNames</code> that triggers a fallback to the prior release. A job with hundreds of historical runs but fewer than 20 in the last 14 days will still spuriously look data-starved and trigger that fallback &mdash; a behavior change unrelated to partition pruning.</p>
 </div>
 
 <h3 style="border:none;margin-top:1.5rem;color:#8a5300;">Should fix</h3>
@@ -149,18 +161,20 @@
 <div class="finding">
   <h3><span class="badge should-fix">Should fix</span>Cluster autocomplete silently filters to empty release</h3>
   <p><code class="loc">pkg/api/autocomplete.go:80-91</code></p>
+  <p style="font-size:0.85rem;color:#8a6d00;"><strong>Status as of f96c187a: unresolved, mechanism shifted.</strong> <code>CurrentActiveRelease</code> (commit a6f4b5a77) now returns an explicit error instead of <code>("", nil)</code> on no match, but <code>autocomplete.go</code> wasn't updated &mdash; it still only logs the error and falls through with <code>clusterRelease = ""</code>, so the outcome is unchanged.</p>
   <pre>clusterRelease, err = query.CurrentActiveRelease(dbc)
 if err != nil {
 	log.WithError(err).Warn("could not determine current development release for cluster autocomplete")
 }
 ...
 <span class="hl">Where("prow_job_release = ?", clusterRelease).</span></pre>
-  <p><code>CurrentActiveRelease</code> can return <code>("", nil)</code> when <code>release_definitions</code> has no matching row (e.g. an under-populated dev/seed DB). There's no error in that case, and even on an actual error the code only logs and continues. Either path leaves <code>clusterRelease = ""</code>, which then filters on <code>prow_job_release = ''</code> and silently returns an empty list with HTTP 200.</p>
+  <p><code>CurrentActiveRelease</code> errors (or previously, returned <code>("", nil)</code>) when <code>release_definitions</code> has no matching row (e.g. an under-populated dev/seed DB). The code only logs and continues. This leaves <code>clusterRelease = ""</code>, which then filters on <code>prow_job_release = ''</code> and silently returns an empty list with HTTP 200.</p>
 </div>
 
 <div class="finding">
   <h3><span class="badge should-fix">Should fix</span>jobRunsCount and testIDsCount lose scope parity</h3>
   <p><code class="loc">pkg/api/tests.go:414-436</code></p>
+  <p style="font-size:0.85rem;color:#8a6d00;"><strong>Status as of f96c187a: partially addressed.</strong> The no-release edge case is now fixed &mdash; <code>GetJobRunTestsCountByLookbackAt</code> propagates an error instead of silently returning mismatched counts (see <code>TestLookbackCount_NoReleasesReturnsError</code>). The core scope-parity concern below, for when a release IS found, is untouched.</p>
   <pre>release, err := query.CurrentActiveRelease(dbc)
 ...
 err = dbc.DB.Table("prow_job_runs").
@@ -179,13 +193,15 @@ err = dbc.DB.Table("release_definitions").
   <li>Diffed the full PR against <code>upstream/main</code> and traced call sites of every function whose query semantics changed.</li>
   <li>Verified the top findings against actual downstream consumers (not just the diff) &mdash; the fallback logic in <code>job_runs.go</code> and the metric exports in <code>sippyserver.go</code>.</li>
   <li>The overall partition-pruning pattern (adding <code>prow_job_release</code> plus timestamp bounds) is consistent with trt-2709's goal and matches prior commits on this branch.</li>
+  <li>Re-checked all four findings against commits a6f4b5a77/f96c187ae (2026-08-18): none fully resolved, see status notes on each finding above.</li>
+  <li><code>LookupProwJobRunPartitionKeys</code> (<code>pkg/db/query/job_queries.go:28-38</code>) now returns <code>gorm.ErrRecordNotFound</code> instead of a zero-value struct on no match (commit a6f4b5a77) &mdash; a correctness improvement, not covered by a prior finding, no issue found with it.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul class="plain">
   <li>For <code>job_results.last_pass</code>: was bounding it to the reporting window intentional, or should it stay unbounded and accept the wider partition scan?</li>
-  <li>For <code>ProwJobRunCount</code>: should the 14-day window be a parameter matching the caller's actual comparison window, given it now backs a <code>&lt; 20</code> threshold that assumed all-time counts?</li>
-  <li>For cluster autocomplete: should an unresolved <code>CurrentActiveRelease</code> return an error instead of silently filtering to an empty release?</li>
+  <li>For <code>ProwJobRunCount</code>: now that the window is parameterized, should the <code>findReleaseMatchJobNames</code> call site pass a wider (or all-time) <code>since</code> rather than 14 days, given the result feeds a <code>&lt; 20</code> threshold that assumed all-time counts?</li>
+  <li>For cluster autocomplete: should the now-explicit error from <code>CurrentActiveRelease</code> be propagated as an error response instead of logged-and-ignored?</li>
   <li>For <code>tests.go</code>: was narrowing <code>jobRunsCount</code> to the current release intentional? If so, should <code>testIDsCount</code> be narrowed to match, or should the metrics be documented as differently scoped?</li>
 </ul>
 
