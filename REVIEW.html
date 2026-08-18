@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3908</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em; }
+  pre { background: #f4f4f5; padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; border: 1px solid #e4e4e7; }
+  .loc { background: #eef; padding: 1px 5px; border-radius: 4px; color: #223; }
+  header { border-bottom: 2px solid #ddd; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0.5rem 0; }
+  header dt { font-weight: 600; color: #555; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .verdict { font-size: 1.05rem; font-weight: 600; padding: 0.8rem 1rem; border-radius: 6px; }
+  .verdict.request-changes { background: #fff1f0; border: 1px solid #ffccc7; color: #a8071a; }
+  .finding { border: 1px solid #e4e4e7; border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+           padding: 2px 8px; border-radius: 10px; margin-right: 0.5rem; vertical-align: middle; }
+  .badge.blocking { background: #ffccc7; color: #a8071a; }
+  .badge.should-fix { background: #ffe7ba; color: #ad4e00; }
+  .badge.nit { background: #d9f7be; color: #237804; }
+  .badge.question { background: #d6e4ff; color: #10239e; }
+  ul.section-list { padding-left: 1.2rem; }
+  a { color: #1554b3; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy#3908</h1>
+  <dl>
+    <dt>Title</dt><dd>Trt 2709 partitioning phase2 post migration</dd>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3908">github.com/openshift/sippy/pull/3908</a></dd>
+    <dt>Head SHA</dt><dd><code>a34ab96af5dc9adb78bead1d7f1627eb41d90da4</code></dd>
+    <dt>Base branch</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-18T22:53:19Z</dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p class="verdict request-changes">Request changes</p>
+<p>The partition-pruning scoping is the right direction, but several of the new release/time-window filters were applied to only one side of a pair of related computations, or silently narrow behavior that other code still depends on (safety window in <code>CleanupPartitions</code>, <code>last_pass</code> in the stored function, the run-count threshold in job matching, and error classification in the re-evaluator). These are correctness regressions, not style nits, and should be resolved or explicitly justified before merge.</p>
+
+<h2>What this PR does</h2>
+<ul class="section-list">
+<li>Post-migration follow-up for the phase-2 table partitioning work (depends on #3907): scopes several queries to <code>prow_job_release</code> so Postgres can prune partitions instead of scanning across releases.</li>
+<li>Rewrites the <code>job_results()</code> Postgres stored function to add release/time-window scoping to its CTEs.</li>
+<li>Adds <code>query.CurrentActiveRelease</code> lookups in several call sites (autocomplete, releases, tests count) to determine which release to scope to.</li>
+<li>Changes <code>CleanupPartitions</code> to use a uniform 100-day cutoff for both detach and drop instead of a staggered 100/110-day window.</li>
+<li>Adds a two-step lookup pattern (<code>LookupProwJobRunPartitionKeys</code> + full row fetch) in <code>jobrunscan/reevaluate.go</code> to support querying a partitioned table by its partition key first.</li>
+<li>Ships <code>pkg/db/migrations/000001_create_partitioned_tables.up.sql</code> recreating the partitioned schema; drops the <code>Labels</code> GIN index annotation from the GORM model.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3 style="margin-top:1.5rem;">Blocking</h3>
+
+<div class="finding">
+<h3><span class="badge blocking">Blocking</span>CleanupPartitions lost its detach/drop safety window</h3>
+<p><span class="loc">pkg/db/db.go:364-394</span></p>
+<p>The doc comment still claims "Drops detached partitions older than 110 days" and "provides a 10-day safety window between detachment and permanent deletion", but the code now calls <code>DetachOldPartitions(100, ...)</code> immediately followed by <code>DropDetachedPartitions(100, ...)</code> with the <em>same</em> cutoff. <code>GetPartitionsForRemoval</code> matches by partition date range, not a detach timestamp, so a partition that just crossed the 100-day threshold is detached and then permanently dropped in the same <code>CleanupPartitions()</code> call &mdash; there's no longer any window to catch a <code>DetachOldPartitions</code> bug before data is gone.</p>
+<pre>// CleanupPartitions performs the full partition lifecycle cleanup:
+// 1. Detaches partitions older than 100 days
+// 2. Drops detached partitions older than 110 days
+//
+// This provides a 10-day safety window between detachment and permanent deletion.
+func (d *DB) CleanupPartitions(dryRun bool) (detached, dropped int, err error) {
+	detached, err = d.DetachOldPartitions(100, dryRun)
+	...
+	dropped, err = d.DropDetachedPartitions(100, dryRun)</pre>
+</div>
+
+<div class="finding">
+<h3><span class="badge blocking">Blocking</span>jobRunsCount and testIDsCount scoped inconsistently</h3>
+<p><span class="loc">pkg/api/tests.go:414-440</span></p>
+<p><code>jobRunsCount</code> is now filtered to a single release (<code>CurrentActiveRelease</code>), but the paired <code>testIDsCount</code> computation just below still iterates <code>release_definitions</code> and aggregates across every release. These two counts feed related Prometheus gauges via <code>RefreshMetricsDB</code>; one becomes single-release, the other stays global &mdash; internally inconsistent metrics, and a departure from the PR's apparent goal of result-preserving/partition-pruning-only filters.</p>
+<pre>var jobRunsCount int64
+err = dbc.DB.Table("prow_job_runs").
+	Where("prow_job_release = ?", release).
+	Where("timestamp &gt; ? AND deleted_at IS NULL", today.AddDays(-lookbackDays).In(time.UTC)).
+	Count(&amp;jobRunsCount).
+	Error
+...
+var releases []string
+err = dbc.DB.Table("release_definitions").
+	Pluck("release", &amp;releases).
+	Error</pre>
+</div>
+
+<h3 style="margin-top:1.5rem;">Should fix</h3>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>job_results() last_pass CTE now bounded to report window</h3>
+<p><span class="loc">pkg/db/functions.go:122-128</span></p>
+<p>The rewritten <code>lp</code> CTE adds <code>AND prow_job_runs.timestamp BETWEEN p_start AND p_endstamp</code>, which the original (unbounded) <code>last_pass</code> CTE did not have. A job that hasn't passed since before <code>p_start</code> now reports <code>last_pass = NULL</code> instead of its true last-passing timestamp &mdash; silently breaking the "how long has this job been failing" signal for long-failing jobs.</p>
+<pre>lp AS (
+    SELECT prow_job_runs.prow_job_id, max(prow_job_runs.timestamp)::timestamp without time zone as last_pass
+    FROM prow_job_runs
+    WHERE overall_result = 'S' AND prow_job_release = p_release
+      AND prow_job_runs.timestamp BETWEEN p_start AND p_endstamp
+    GROUP BY prow_job_runs.prow_job_id
+)</pre>
+</div>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>ProwJobRunCount changed from all-time to 14-day window</h3>
+<p><span class="loc">pkg/db/query/job_queries.go:76-86</span></p>
+<p><code>ProwJobRunCount</code> now hardcodes <code>timestamp &gt; NOW() - INTERVAL '14 days'</code>, whereas the previous implementation counted all-time runs. This feeds the <code>&lt; 20</code> similar-job threshold check in <code>pkg/api/job_runs.go:684</code>, which falls back to a prior release when the count is low. A job with a long healthy history but low run frequency in the last 14 days (e.g. weekly periodics) now spuriously looks under-provisioned and takes a fallback path it never took before.</p>
+<pre>func ProwJobRunCount(dbc *db.DB, prowJobID uint, release string) (int, error) {
+	var count int64
+	q := dbc.DB.Table("prow_job_runs").
+		Where("prow_job_id = ?", prowJobID).
+		Where("prow_job_release = ?", release).
+		Where("timestamp &gt; NOW() - INTERVAL '14 days'")</pre>
+</div>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>ErrRecordNotFound from partition-key lookup miscategorized as eval error</h3>
+<p><span class="loc">pkg/api/jobrunscan/reevaluate.go:180-200</span></p>
+<p><code>LookupProwJobRunPartitionKeys</code> failing with <code>gorm.ErrRecordNotFound</code> is unconditionally mapped to <code>ReEvalEvalError</code>, while the very next lookup (the full row fetch) correctly distinguishes <code>ErrRecordNotFound</code> &rarr; <code>ReEvalMissingError</code> from other errors. A build ID with no matching row &mdash; a common, benign case &mdash; now surfaces as an "eval error" instead of "missing", likely affecting downstream alerting/retry logic that treats the two differently.</p>
+<pre>partKeys, err := query.LookupProwJobRunPartitionKeys(r.db, jobRunID)
+if err != nil {
+	result.Status = ReEvalEvalError
+	result.Error = fmt.Sprintf("looking up partition keys for job run %s: %v", buildID, err)
+	return result
+}
+...
+if res.Error != nil {
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		result.Status = ReEvalMissingError
+	} else {
+		result.Status = ReEvalEvalError
+	}</pre>
+</div>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>Cluster autocomplete silently returns empty list on CurrentActiveRelease failure</h3>
+<p><span class="loc">pkg/api/autocomplete.go:79-93</span></p>
+<p>If <code>query.CurrentActiveRelease</code> errors, the failure is only <code>Warn</code>-logged and <code>clusterRelease</code> stays <code>""</code>. The query then runs <code>Where("prow_job_release = ?", "")</code>, matching nothing, so the endpoint returns HTTP 200 with an empty list instead of surfacing the real backend failure.</p>
+<pre>clusterRelease := release
+if clusterRelease == "" {
+	var err error
+	clusterRelease, err = query.CurrentActiveRelease(dbc)
+	if err != nil {
+		log.WithError(err).Warn("could not determine current development release for cluster autocomplete")
+	}
+}
+q = q.Table("prow_job_runs")...Where("prow_job_release = ?", clusterRelease)</pre>
+</div>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>GIN index on prow_job_runs.labels not recreated in new partitioned migration</h3>
+<p><span class="loc">pkg/db/migrations/000001_create_partitioned_tables.up.sql:22-30</span></p>
+<p>The <code>Labels</code> GORM tag no longer requests a GIN index in <code>pkg/db/models/prow.go</code>, and this migration's index block does not recreate one either. <code>pkg/api/componentreadiness/dataprovider/postgres/provider.go:412</code> still runs an array-containment query (<code>pjr.labels @&gt; ARRAY['InfraFailure']</code>) against this column &mdash; without the index this falls back to a sequential/partition scan, a latent performance regression that worsens as data grows.</p>
+</div>
+
+<div class="finding">
+<h3><span class="badge should-fix">Should fix</span>GetLastUpdateTime zero-time fallback not guarded by all callers</h3>
+<p><span class="loc">pkg/api/releases.go:673-684</span></p>
+<p>When no job runs exist for the active release in the last 14 days, <code>GetLastUpdateTime</code> returns the <code>COALESCE(..., '0001-01-01')</code> fallback with <code>err == nil</code>. <code>pkg/sippyserver/metrics/metrics.go</code> checks <code>IsZero()</code> before use, but <code>pkg/mcp/tools/releases.go:55-56</code> and <code>pkg/sippyserver/server.go:1357</code> (<code>jsonReleasesReportFromDB</code>) assign the value straight into <code>BuildReleasesResponse</code> without that guard.</p>
+<pre>if err := dbc.DB.Raw("SELECT COALESCE(MAX(created_at), '0001-01-01') FROM prow_job_runs WHERE prow_job_release = ? AND timestamp &gt; NOW() - INTERVAL '14 days'", rel).
+	Scan(&amp;lastUpdated).Error; err != nil {
+	return time.Time{}, fmt.Errorf("query last update time: %w", err)
+}
+return lastUpdated, nil</pre>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="section-list">
+<li>Overall pattern of scoping queries to <code>CurrentActiveRelease</code> for partition pruning is sound where both sides of a comparison are scoped consistently.</li>
+<li>Two-step partition-key lookup pattern in <code>reevaluate.go</code> (fetch keys, then fetch full row) is a reasonable approach for querying partitioned tables without a full scan.</li>
+<li>New partitioned-table migration's column/type definitions match the previous unpartitioned schema for the tables inspected.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul class="section-list">
+<li><code>pkg/db/db.go</code>: was the detach/drop cutoff collapse to 100/100 intentional, or should the doc comment and the 110-day drop cutoff be restored? The comment still describes the old two-phase safety window.</li>
+<li><code>pkg/api/tests.go</code>: should <code>testIDsCount</code> also be scoped to <code>CurrentActiveRelease</code>, or was leaving it global intentional (e.g. a global test-ID cardinality metric)? If intentional, worth a comment since it now differs in scope from <code>jobRunsCount</code>.</li>
+<li><code>pkg/db/functions.go</code>: is the <code>last_pass</code> time-bounding in the <code>lp</code> CTE deliberate (e.g. to bound the function's runtime via partition pruning), accepting that jobs failing since before <code>p_start</code> will show <code>last_pass = NULL</code>?</li>
+<li><code>pkg/db/query/job_queries.go</code>: is the 14-day window on <code>ProwJobRunCount</code> meant to change the <code>&lt; 20</code> threshold's semantics in <code>findReleaseMatchJobNames</code>, or should that threshold be re-tuned/documented for the new window?</li>
+</ul>
+
+</body>
+</html>
