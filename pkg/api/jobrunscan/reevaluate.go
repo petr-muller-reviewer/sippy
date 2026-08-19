@@ -179,7 +179,7 @@ func (r *ReEvaluator) reEvaluateOne(ctx context.Context, buildID string, symptom
 		return result
 	}
 
-	partKeys, err := query.LookupProwJobRunPartitionKeys(r.db, jobRunID)
+	partKeys, err := query.LookupProwJobRunPartitionKeys(r.db.DB, jobRunID)
 	if err != nil {
 		result.Status = ReEvalEvalError
 		result.Error = fmt.Sprintf("looking up partition keys for job run %s: %v", buildID, err)

@@ -13,10 +13,11 @@ package infrafailure
 
 import (
 	"fmt"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+
+	"github.com/openshift/sippy/pkg/db/query"
 )
 
 // LabelInfraFailure is the job run label applied to runs that failed for
@@ -151,13 +152,8 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
 	// Read the run's partition keys (release and timestamp) so the delta scan
 	// below can prune to the run's single partition instead of scanning every
 	// partition for the run id.
-	var partKeys struct {
-		ProwJobRelease string    `gorm:"column:prow_job_release"`
-		Timestamp      time.Time `gorm:"column:timestamp"`
-	}
-	if err := tx.Raw(
-		`SELECT prow_job_release, timestamp FROM prow_job_runs WHERE id = ?`, prowJobRunID,
-	).Scan(&partKeys).Error; err != nil {
+	partKeys, err := query.LookupProwJobRunPartitionKeys(tx, int64(prowJobRunID))
+	if err != nil {
 		return fmt.Errorf("reading partition keys for prow_job_run %d: %w", prowJobRunID, err)
 	}
 
