@@ -13,6 +13,7 @@ package infrafailure
 
 import (
 	"fmt"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
@@ -42,41 +43,51 @@ SET labels = array_append(labels, 'InfraFailure')
 WHERE id = ?
   AND (labels IS NULL OR NOT (labels @> ARRAY['InfraFailure']))`
 
-// deltaCTE aggregates one job run's test results into per-summary-key deltas.
+// createDeltasTempTableSQL materializes one job run's test results into a temp
+// table of per-summary-key deltas. The table is dropped automatically when the
+// transaction ends (ON COMMIT DROP); the two UPDATE statements below read from
+// it so the scan and aggregation run once rather than once per statement.
+//
 // The grouping matches the write path (pgwriter.createBatchDeltas and
 // dailysummary.insertSQL) exactly so the subtraction targets the same rows the
 // addition created: keyed by (release, date, test_id, suite_id, lifecycle,
 // prow_job_id), using date(prow_job_run_timestamp) with no timezone conversion
 // and COALESCE(suite_id, 0). Status values are 1=success, 12=failure,
 // 13=flake (see sippyprocessing/v1 TestStatus constants).
-const deltaCTE = `
-WITH deltas AS (
-	SELECT
-		prow_job_run_release AS release,
-		date(prow_job_run_timestamp) AS date,
-		test_id,
-		COALESCE(suite_id, 0) AS suite_id,
-		lifecycle,
-		prow_job_id,
-		COUNT(*) FILTER (WHERE status = 1) AS successes,
-		COUNT(*) FILTER (WHERE status = 12) AS failures,
-		COUNT(*) FILTER (WHERE status = 13) AS flakes,
-		COUNT(*) AS runs
-	FROM prow_job_run_tests
-	WHERE prow_job_run_id = ? AND deleted_at IS NULL
-	GROUP BY prow_job_run_release, date(prow_job_run_timestamp), test_id,
-		COALESCE(suite_id, 0), lifecycle, prow_job_id
-)`
+//
+// The release and timestamp placeholders carry the run's partition key values
+// so the planner can prune to the run's single partition (equality on the raw
+// partition-key columns) instead of scanning every partition for the run id.
+const createDeltasTempTableSQL = `
+CREATE TEMP TABLE infra_failure_deltas ON COMMIT DROP AS
+SELECT
+	prow_job_run_release AS release,
+	date(prow_job_run_timestamp) AS date,
+	test_id,
+	COALESCE(suite_id, 0) AS suite_id,
+	lifecycle,
+	prow_job_id,
+	COUNT(*) FILTER (WHERE status = 1) AS successes,
+	COUNT(*) FILTER (WHERE status = 12) AS failures,
+	COUNT(*) FILTER (WHERE status = 13) AS flakes,
+	COUNT(*) AS runs
+FROM prow_job_run_tests
+WHERE prow_job_run_id = ? AND deleted_at IS NULL
+	AND prow_job_run_release = ?
+	AND prow_job_run_timestamp = ?
+GROUP BY prow_job_run_release, date(prow_job_run_timestamp), test_id,
+	COALESCE(suite_id, 0), lifecycle, prow_job_id`
 
 // subtractDailyTotalsSQL removes the run's per-day counts from
-// test_daily_totals for each affected summary key.
-const subtractDailyTotalsSQL = deltaCTE + `
+// test_daily_totals for each affected summary key, reading the deltas from the
+// materialized temp table.
+const subtractDailyTotalsSQL = `
 UPDATE test_daily_totals dt SET
 	successes = dt.successes - d.successes,
 	failures = dt.failures - d.failures,
 	flakes = dt.flakes - d.flakes,
 	runs = dt.runs - d.runs
-FROM deltas d
+FROM infra_failure_deltas d
 WHERE dt.release = d.release
 	AND dt.date = d.date
 	AND dt.test_id = d.test_id
@@ -85,16 +96,17 @@ WHERE dt.release = d.release
 	AND dt.prow_job_id = d.prow_job_id`
 
 // subtractCumulativeSummariesSQL cascades the same subtraction into the
-// cumulative prefix sums. Because each row holds a running total ordered by
-// date, a constant-offset subtraction is applied to every row from the
-// affected date onward (date >= d.date).
-const subtractCumulativeSummariesSQL = deltaCTE + `
+// cumulative prefix sums, reading the deltas from the materialized temp table.
+// Because each row holds a running total ordered by date, a constant-offset
+// subtraction is applied to every row from the affected date onward
+// (date >= d.date).
+const subtractCumulativeSummariesSQL = `
 UPDATE test_cumulative_summaries cs SET
 	prefix_sum_successes = cs.prefix_sum_successes - d.successes,
 	prefix_sum_failures = cs.prefix_sum_failures - d.failures,
 	prefix_sum_flakes = cs.prefix_sum_flakes - d.flakes,
 	prefix_sum_runs = cs.prefix_sum_runs - d.runs
-FROM deltas d
+FROM infra_failure_deltas d
 WHERE cs.release = d.release
 	AND cs.test_id = d.test_id
 	AND cs.suite_id = d.suite_id
@@ -136,8 +148,28 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
 	}
 	logger.Debug("set InfraFailure label on prow job run")
 
+	// Read the run's partition keys (release and timestamp) so the delta scan
+	// below can prune to the run's single partition instead of scanning every
+	// partition for the run id.
+	var partKeys struct {
+		ProwJobRelease string    `gorm:"column:prow_job_release"`
+		Timestamp      time.Time `gorm:"column:timestamp"`
+	}
+	if err := tx.Raw(
+		`SELECT prow_job_release, timestamp FROM prow_job_runs WHERE id = ?`, prowJobRunID,
+	).Scan(&partKeys).Error; err != nil {
+		return fmt.Errorf("reading partition keys for prow_job_run %d: %w", prowJobRunID, err)
+	}
+
+	// Materialize the per-summary-key deltas once so both UPDATEs below read
+	// them from a single scan and aggregation rather than re-evaluating the
+	// join twice.
+	if err := tx.Exec(createDeltasTempTableSQL, prowJobRunID, partKeys.ProwJobRelease, partKeys.Timestamp).Error; err != nil {
+		return fmt.Errorf("materializing deltas for prow_job_run %d: %w", prowJobRunID, err)
+	}
+
 	// Subtract the run's counts from the per-day totals.
-	dailyRes := tx.Exec(subtractDailyTotalsSQL, prowJobRunID)
+	dailyRes := tx.Exec(subtractDailyTotalsSQL)
 	if dailyRes.Error != nil {
 		return fmt.Errorf("subtracting daily totals for prow_job_run %d: %w", prowJobRunID, dailyRes.Error)
 	}
@@ -145,7 +177,7 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
 
 	// Cascade the subtraction into the cumulative prefix sums from the affected
 	// date onward.
-	cumulativeRes := tx.Exec(subtractCumulativeSummariesSQL, prowJobRunID)
+	cumulativeRes := tx.Exec(subtractCumulativeSummariesSQL)
 	if cumulativeRes.Error != nil {
 		return fmt.Errorf("subtracting cumulative summaries for prow_job_run %d: %w", prowJobRunID, cumulativeRes.Error)
 	}

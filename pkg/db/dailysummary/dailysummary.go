@@ -40,7 +40,6 @@ const insertSQL = `
 	WHERE pjrt.prow_job_run_timestamp >= ?::date
 	  AND pjrt.prow_job_run_timestamp < (?::date + INTERVAL '1 day')
 	  AND pjrt.prow_job_run_release = ?
-	  -- Exclude InfraFailure-labeled runs so they never count toward the daily totals.
 	  AND (pjr.labels IS NULL OR NOT (pjr.labels @> ARRAY['InfraFailure']))
 	GROUP BY pjrt.test_id, pjrt.prow_job_id, COALESCE(pjrt.suite_id, 0), pjrt.lifecycle, pjrt.prow_job_run_release, date(pjrt.prow_job_run_timestamp)`
 
