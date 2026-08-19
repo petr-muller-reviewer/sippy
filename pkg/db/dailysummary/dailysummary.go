@@ -36,7 +36,7 @@ const insertSQL = `
 		MIN(pjrt.prow_job_run_timestamp) FILTER (WHERE pjrt.status = 1),
 		MAX(pjrt.prow_job_run_timestamp) FILTER (WHERE pjrt.status = 1)
 	FROM prow_job_run_tests pjrt
-	JOIN prow_job_runs pjr ON pjr.id = pjrt.prow_job_run_id
+	JOIN prow_job_runs pjr ON pjr.id = pjrt.prow_job_run_id AND pjr.prow_job_release = pjrt.prow_job_run_release AND pjr.timestamp = pjrt.prow_job_run_timestamp
 	WHERE pjrt.prow_job_run_timestamp >= ?::date
 	  AND pjrt.prow_job_run_timestamp < (?::date + INTERVAL '1 day')
 	  AND pjrt.prow_job_run_release = ?
