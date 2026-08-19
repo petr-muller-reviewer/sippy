@@ -490,7 +490,10 @@ func (r *ReEvaluator) clearGCSLabels(ctx context.Context, jobRunPath string) err
 	return nil
 }
 
-// updatePostgresLabels updates the labels array on prow_job_runs (and release_job_runs if applicable).
+// updatePostgresLabels updates the labels array on prow_job_runs (and
+// release_job_runs if applicable). It never introduces the InfraFailure label,
+// but preserves it when the target row already carries it (set by the single
+// handler), so these full-array replaces do not clobber it.
 func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, jobRun *models.ProwJobRun, newBQLabels []models.JobRunLabel) error {
 	// Query BQ for existing non-symptom labels for this build ID
 	manualLabels, err := r.queryNonSymptomLabels(ctx, buildID, jobRun.Timestamp)
@@ -504,32 +507,45 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 	// Merge manual labels with new symptom labels
 	merged := mergeLabels(manualLabels, newBQLabels)
 
-	// InfraFailure must never be written to PostgreSQL by the re-evaluator. It
-	// is still recorded in BigQuery and GCS above; only the dedicated single
-	// handler sets it in PG, as part of the atomic summary-table subtraction
-	// (see pkg/db/infrafailure). Strip it from the set before every PG write.
-	pgLabels := pq.StringArray(filterInfraFailureLabel(merged))
+	// InfraFailure must never be introduced by the re-evaluator: it is recorded
+	// in BigQuery and GCS above, but in PostgreSQL only the dedicated single
+	// handler sets it (atomically, alongside the summary-table subtraction; see
+	// pkg/db/infrafailure). Because the writes below fully replace the labels
+	// array, finalizePGLabels strips InfraFailure from the merged set yet re-adds
+	// it when the row's current PG labels already carry it, so we never clobber a
+	// value the single handler set.
 
-	// Update prow_job_runs
+	// Re-read the row's current prow_job_runs labels immediately before the write
+	// so a concurrently-set InfraFailure survives this full-array replace.
+	var currentRun models.ProwJobRun
+	if err := r.db.DB.
+		Select("labels").
+		Where("id = ? AND prow_job_release = ? AND timestamp = ?", jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).
+		Take(&currentRun).Error; err != nil {
+		return fmt.Errorf("reading current prow_job_runs.labels for build %s: %w", buildID, err)
+	}
+	prowJobRunLabels := pq.StringArray(finalizePGLabels(merged, currentRun.Labels))
 	if err := r.db.DB.Model(&models.ProwJobRun{}).
 		Where("id = ? AND prow_job_release = ? AND timestamp = ?", jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).
-		Update("labels", pgLabels).Error; err != nil {
+		Update("labels", prowJobRunLabels).Error; err != nil {
 		return fmt.Errorf("updating prow_job_runs.labels: %w", err)
 	}
 
-	// Check and update release_job_runs if this job run exists there
+	// Check and update release_job_runs if this job run exists there. Its freshly
+	// loaded labels are the current-state check for InfraFailure preservation.
 	var releaseJobRun models.ReleaseJobRun
 	if err := r.db.DB.Where("prow_job_run_id = ?", jobRun.ID).First(&releaseJobRun).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("looking up release_job_runs for build %s: %w", buildID, err)
 		}
 	} else {
-		if err := r.db.DB.Model(&releaseJobRun).Update("labels", pgLabels).Error; err != nil {
+		releaseJobRunLabels := pq.StringArray(finalizePGLabels(merged, releaseJobRun.Labels))
+		if err := r.db.DB.Model(&releaseJobRun).Update("labels", releaseJobRunLabels).Error; err != nil {
 			return fmt.Errorf("updating release_job_runs.labels: %w", err)
 		}
 	}
 
-	log.WithFields(log.Fields{"buildID": buildID, "labels": pgLabels}).Debug("symptom reEval: updated PostgreSQL labels")
+	log.WithFields(log.Fields{"buildID": buildID, "labels": prowJobRunLabels}).Debug("symptom reEval: updated PostgreSQL labels")
 	return nil
 }
 
@@ -547,6 +563,23 @@ func filterInfraFailureLabel(labels []string) []string {
 		filtered = append(filtered, l)
 	}
 	return filtered
+}
+
+// finalizePGLabels computes the label set to persist to PostgreSQL for a single
+// row. It always strips InfraFailure from the re-evaluator's merged set (the
+// re-evaluator must never introduce that label), but re-adds it once when the
+// row's current PG labels already carry it, so a full-array replace does not
+// clobber a value set by the single handler. The result contains InfraFailure
+// at most once.
+func finalizePGLabels(merged, currentPGLabels []string) []string {
+	final := filterInfraFailureLabel(merged)
+	for _, l := range currentPGLabels {
+		if l == infrafailure.LabelInfraFailure {
+			final = append(final, infrafailure.LabelInfraFailure)
+			break
+		}
+	}
+	return final
 }
 
 // queryNonSymptomLabels queries BQ for labels that were NOT applied by symptom detection.

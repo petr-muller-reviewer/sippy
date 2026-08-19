@@ -14,6 +14,7 @@ package infrafailure
 import (
 	"fmt"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
 
@@ -102,17 +103,26 @@ WHERE cs.release = d.release
 	AND cs.date >= d.date`
 
 // RecordInfraFailure marks a prow job run as an infrastructure failure and
-// removes its contribution from the pre-aggregated summary tables, all within
-// the caller-supplied transaction so the label and the subtraction commit (or
-// roll back) atomically.
+// removes its contribution from the pre-aggregated summary tables. It opens its
+// own transaction on dbc so the label set and the summary subtraction commit
+// (or roll back) atomically. dbc may be a plain database connection or an
+// existing transaction; gorm nests the latter as a savepoint.
 //
 // The operation is idempotent: if the run already carries the InfraFailure
 // label the function returns nil without touching the summary tables, because
 // the invariant guarantees the subtraction was already performed.
-//
-// The caller owns the transaction lifecycle. If this function returns an error,
-// the caller must roll back so neither the label nor the subtraction persists.
-func RecordInfraFailure(tx *gorm.DB, prowJobRunID uint) error {
+func RecordInfraFailure(dbc *gorm.DB, prowJobRunID uint) error {
+	return dbc.Transaction(func(tx *gorm.DB) error {
+		return recordInfraFailureInTx(tx, prowJobRunID)
+	})
+}
+
+// recordInfraFailureInTx performs the label set and summary subtraction on the
+// supplied transaction. Returning an error rolls back the transaction so
+// neither the label nor the subtraction persists, preserving the invariant.
+func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
+	logger := log.WithField("prowJobRunID", prowJobRunID)
+
 	// Conditional UPDATE as the first operation: set the label and acquire the
 	// row lock together. RowsAffected == 0 means the label was already set, so
 	// the subtraction is already done -- nothing further to do.
@@ -121,19 +131,25 @@ func RecordInfraFailure(tx *gorm.DB, prowJobRunID uint) error {
 		return fmt.Errorf("setting InfraFailure label on prow_job_run %d: %w", prowJobRunID, res.Error)
 	}
 	if res.RowsAffected == 0 {
+		logger.Debug("prow job run already labeled InfraFailure; summary subtraction already applied, skipping")
 		return nil
 	}
+	logger.Debug("set InfraFailure label on prow job run")
 
 	// Subtract the run's counts from the per-day totals.
-	if err := tx.Exec(subtractDailyTotalsSQL, prowJobRunID).Error; err != nil {
-		return fmt.Errorf("subtracting daily totals for prow_job_run %d: %w", prowJobRunID, err)
+	dailyRes := tx.Exec(subtractDailyTotalsSQL, prowJobRunID)
+	if dailyRes.Error != nil {
+		return fmt.Errorf("subtracting daily totals for prow_job_run %d: %w", prowJobRunID, dailyRes.Error)
 	}
+	logger.WithField("rowsAffected", dailyRes.RowsAffected).Debug("subtracted infra-failure run from test_daily_totals")
 
 	// Cascade the subtraction into the cumulative prefix sums from the affected
 	// date onward.
-	if err := tx.Exec(subtractCumulativeSummariesSQL, prowJobRunID).Error; err != nil {
-		return fmt.Errorf("subtracting cumulative summaries for prow_job_run %d: %w", prowJobRunID, err)
+	cumulativeRes := tx.Exec(subtractCumulativeSummariesSQL, prowJobRunID)
+	if cumulativeRes.Error != nil {
+		return fmt.Errorf("subtracting cumulative summaries for prow_job_run %d: %w", prowJobRunID, cumulativeRes.Error)
 	}
+	logger.WithField("rowsAffected", cumulativeRes.RowsAffected).Debug("subtracted infra-failure run from test_cumulative_summaries")
 
 	return nil
 }

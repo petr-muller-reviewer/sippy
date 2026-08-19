@@ -214,6 +214,70 @@ func TestFilterInfraFailureLabel(t *testing.T) {
 	}
 }
 
+func TestFinalizePGLabels(t *testing.T) {
+	tests := []struct {
+		name            string
+		merged          []string
+		currentPGLabels []string
+		want            []string
+	}{
+		{
+			name:            "no infra anywhere",
+			merged:          []string{"FlakeDetected"},
+			currentPGLabels: []string{"FlakeDetected"},
+			want:            []string{"FlakeDetected"},
+		},
+		{
+			name:            "merged has infra, current does not - stripped",
+			merged:          []string{"FlakeDetected", "InfraFailure"},
+			currentPGLabels: []string{"FlakeDetected"},
+			want:            []string{"FlakeDetected"},
+		},
+		{
+			name:            "current has infra, merged does not - preserved",
+			merged:          []string{"FlakeDetected"},
+			currentPGLabels: []string{"FlakeDetected", "InfraFailure"},
+			want:            []string{"FlakeDetected", "InfraFailure"},
+		},
+		{
+			name:            "both have infra - preserved exactly once",
+			merged:          []string{"InfraFailure", "DNSTimeout"},
+			currentPGLabels: []string{"InfraFailure"},
+			want:            []string{"DNSTimeout", "InfraFailure"},
+		},
+		{
+			name:            "current has infra, merged empty - only infra preserved",
+			merged:          nil,
+			currentPGLabels: []string{"InfraFailure"},
+			want:            []string{"InfraFailure"},
+		},
+		{
+			name:            "current nil, merged has infra - stripped to empty",
+			merged:          []string{"InfraFailure"},
+			currentPGLabels: nil,
+			want:            nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := finalizePGLabels(tt.merged, tt.currentPGLabels)
+			if !sameStrings(got, tt.want) {
+				t.Errorf("finalizePGLabels() = %v, want %v", got, tt.want)
+			}
+			count := 0
+			for _, l := range got {
+				if l == "InfraFailure" {
+					count++
+				}
+			}
+			if count > 1 {
+				t.Errorf("finalizePGLabels() produced duplicate InfraFailure: %v", got)
+			}
+		})
+	}
+}
+
 func TestUniqueSymptomsMatched(t *testing.T) {
 	matches := []symptomMatch{
 		{symptom: jobrunscan.Symptom{SymptomContent: jobrunscan.SymptomContent{ID: "s1"}}},

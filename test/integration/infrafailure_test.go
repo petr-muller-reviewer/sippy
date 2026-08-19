@@ -7,7 +7,6 @@ import (
 	"cloud.google.com/go/civil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 
 	"github.com/openshift/sippy/pkg/dataloader/prowloader/pgwriter"
 	"github.com/openshift/sippy/pkg/db/infrafailure"
@@ -53,10 +52,9 @@ func TestRecordInfraFailureSubtractsFromSummaries(t *testing.T) {
 	require.Equal(t, int32(1), dt.Failures)
 	require.Equal(t, int32(2), dt.Runs)
 
-	// Record the infra failure for the first run.
-	require.NoError(t, dbc.DB.Transaction(func(tx *gorm.DB) error {
-		return infrafailure.RecordInfraFailure(tx, infraRunID)
-	}))
+	// Record the infra failure for the first run. RecordInfraFailure opens its
+	// own transaction on the supplied connection.
+	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, infraRunID))
 
 	// The InfraFailure label is applied to the infra run (exercising the
 	// NULL-safe gate, since the run had no labels).
@@ -104,9 +102,7 @@ func TestRecordInfraFailureIsIdempotent(t *testing.T) {
 	require.NoError(t, dbc.DB.Where("name = ?", "infra-idem-test").First(&test).Error)
 
 	call := func() {
-		require.NoError(t, dbc.DB.Transaction(func(tx *gorm.DB) error {
-			return infrafailure.RecordInfraFailure(tx, runID)
-		}))
+		require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, runID))
 	}
 
 	// First call subtracts the single run down to zero.
