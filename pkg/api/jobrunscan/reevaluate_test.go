@@ -166,113 +166,77 @@ func TestMergeLabels(t *testing.T) {
 	}
 }
 
-func TestFilterInfraFailureLabel(t *testing.T) {
+func TestExcludeNewInfraFailure(t *testing.T) {
 	tests := []struct {
-		name   string
-		labels []string
-		want   []string
+		name                    string
+		labels                  []string
+		infraFailureAlreadyInPG bool
+		want                    []string
 	}{
 		{
-			name:   "nil input",
-			labels: nil,
-			want:   nil,
+			name:                    "nil input",
+			labels:                  nil,
+			infraFailureAlreadyInPG: false,
+			want:                    nil,
 		},
 		{
-			name:   "no infra failure label",
-			labels: []string{"FlakeDetected", "DNSTimeout"},
-			want:   []string{"FlakeDetected", "DNSTimeout"},
+			name:                    "empty input",
+			labels:                  []string{},
+			infraFailureAlreadyInPG: false,
+			want:                    nil,
 		},
 		{
-			name:   "infra failure removed, others kept",
-			labels: []string{"FlakeDetected", "InfraFailure", "DNSTimeout"},
-			want:   []string{"FlakeDetected", "DNSTimeout"},
+			name:                    "infra failure not present, not in PG - unchanged",
+			labels:                  []string{"FlakeDetected", "DNSTimeout"},
+			infraFailureAlreadyInPG: false,
+			want:                    []string{"FlakeDetected", "DNSTimeout"},
 		},
 		{
-			name:   "only infra failure",
-			labels: []string{"InfraFailure"},
-			want:   nil,
+			name:                    "infra failure not present, already in PG - unchanged",
+			labels:                  []string{"FlakeDetected", "DNSTimeout"},
+			infraFailureAlreadyInPG: true,
+			want:                    []string{"FlakeDetected", "DNSTimeout"},
 		},
 		{
-			name:   "order preserved",
-			labels: []string{"A", "InfraFailure", "B", "C"},
-			want:   []string{"A", "B", "C"},
+			name:                    "infra failure present, already in PG - preserved",
+			labels:                  []string{"FlakeDetected", "InfraFailure", "DNSTimeout"},
+			infraFailureAlreadyInPG: true,
+			want:                    []string{"FlakeDetected", "InfraFailure", "DNSTimeout"},
+		},
+		{
+			name:                    "infra failure present, not in PG - stripped",
+			labels:                  []string{"FlakeDetected", "InfraFailure", "DNSTimeout"},
+			infraFailureAlreadyInPG: false,
+			want:                    []string{"FlakeDetected", "DNSTimeout"},
+		},
+		{
+			name:                    "only infra failure, not in PG - stripped to empty",
+			labels:                  []string{"InfraFailure"},
+			infraFailureAlreadyInPG: false,
+			want:                    nil,
+		},
+		{
+			name:                    "only infra failure, already in PG - preserved",
+			labels:                  []string{"InfraFailure"},
+			infraFailureAlreadyInPG: true,
+			want:                    []string{"InfraFailure"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := filterInfraFailureLabel(tt.labels)
+			got := excludeNewInfraFailure(tt.labels, tt.infraFailureAlreadyInPG)
 			if !sameStrings(got, tt.want) {
-				t.Errorf("filterInfraFailureLabel() = %v, want %v", got, tt.want)
+				t.Errorf("excludeNewInfraFailure() = %v, want %v", got, tt.want)
 			}
-			for _, l := range got {
-				if l == "InfraFailure" {
-					t.Errorf("filterInfraFailureLabel() retained InfraFailure: %v", got)
+			// When the label was not already in PG, the re-evaluator must never
+			// introduce it, so the result must not contain InfraFailure.
+			if !tt.infraFailureAlreadyInPG {
+				for _, l := range got {
+					if l == "InfraFailure" {
+						t.Errorf("excludeNewInfraFailure() introduced InfraFailure: %v", got)
+					}
 				}
-			}
-		})
-	}
-}
-
-func TestFinalizePGLabels(t *testing.T) {
-	tests := []struct {
-		name            string
-		merged          []string
-		currentPGLabels []string
-		want            []string
-	}{
-		{
-			name:            "no infra anywhere",
-			merged:          []string{"FlakeDetected"},
-			currentPGLabels: []string{"FlakeDetected"},
-			want:            []string{"FlakeDetected"},
-		},
-		{
-			name:            "merged has infra, current does not - stripped",
-			merged:          []string{"FlakeDetected", "InfraFailure"},
-			currentPGLabels: []string{"FlakeDetected"},
-			want:            []string{"FlakeDetected"},
-		},
-		{
-			name:            "current has infra, merged does not - preserved",
-			merged:          []string{"FlakeDetected"},
-			currentPGLabels: []string{"FlakeDetected", "InfraFailure"},
-			want:            []string{"FlakeDetected", "InfraFailure"},
-		},
-		{
-			name:            "both have infra - preserved exactly once",
-			merged:          []string{"InfraFailure", "DNSTimeout"},
-			currentPGLabels: []string{"InfraFailure"},
-			want:            []string{"DNSTimeout", "InfraFailure"},
-		},
-		{
-			name:            "current has infra, merged empty - only infra preserved",
-			merged:          nil,
-			currentPGLabels: []string{"InfraFailure"},
-			want:            []string{"InfraFailure"},
-		},
-		{
-			name:            "current nil, merged has infra - stripped to empty",
-			merged:          []string{"InfraFailure"},
-			currentPGLabels: nil,
-			want:            nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := finalizePGLabels(tt.merged, tt.currentPGLabels)
-			if !sameStrings(got, tt.want) {
-				t.Errorf("finalizePGLabels() = %v, want %v", got, tt.want)
-			}
-			count := 0
-			for _, l := range got {
-				if l == "InfraFailure" {
-					count++
-				}
-			}
-			if count > 1 {
-				t.Errorf("finalizePGLabels() produced duplicate InfraFailure: %v", got)
 			}
 		})
 	}
