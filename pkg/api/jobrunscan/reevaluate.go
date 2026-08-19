@@ -492,9 +492,11 @@ func (r *ReEvaluator) clearGCSLabels(ctx context.Context, jobRunPath string) err
 }
 
 // updatePostgresLabels updates the labels array on prow_job_runs (and
-// release_job_runs if applicable). It never introduces the InfraFailure label,
-// but preserves it when the target row already carries it (set by
-// RecordInfraFailure), so these full-array replaces do not clobber it.
+// release_job_runs if applicable). For prow_job_runs it never introduces the
+// InfraFailure label, but preserves it when the row already carries it (set by
+// RecordInfraFailure), so the full-array replace does not clobber it.
+// release_job_runs is not coupled to the summary-table subtraction, so it
+// receives the merged label set as-is.
 func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, jobRun *models.ProwJobRun, newBQLabels []models.JobRunLabel) error {
 	// Query BQ for existing non-symptom labels for this build ID
 	manualLabels, err := r.queryNonSymptomLabels(ctx, buildID, jobRun.Timestamp)
@@ -531,24 +533,17 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 		return fmt.Errorf("updating prow_job_runs.labels: %w", err)
 	}
 
-	// Mirror the labels onto release_job_runs when this job run has a release row.
-	// Select only the primary key: the InfraFailure check below uses a containment
-	// query rather than the full labels array.
+	// Mirror the merged labels onto release_job_runs when this job run has a
+	// release row. Unlike prow_job_runs, release_job_runs is not coupled to the
+	// summary-table subtraction, so the merged set is written as-is. Select only
+	// the primary key: it is all the label update needs.
 	var releaseJobRun models.ReleaseJobRun
 	if err := r.db.DB.Select("id").Where("prow_job_run_id = ?", jobRun.ID).First(&releaseJobRun).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("looking up release_job_runs for build %s: %w", buildID, err)
 		}
 	} else {
-		releaseJobRunLabels := merged
-		if mergedHasInfraFailure {
-			alreadyInPG, err := r.releaseJobRunHasInfraFailureLabel(jobRun.ID)
-			if err != nil {
-				return fmt.Errorf("checking release_job_runs InfraFailure for build %s: %w", buildID, err)
-			}
-			releaseJobRunLabels = excludeNewInfraFailure(merged, alreadyInPG)
-		}
-		if err := r.db.DB.Model(&releaseJobRun).Update("labels", pq.StringArray(releaseJobRunLabels)).Error; err != nil {
+		if err := r.db.DB.Model(&releaseJobRun).Update("labels", pq.StringArray(merged)).Error; err != nil {
 			return fmt.Errorf("updating release_job_runs.labels: %w", err)
 		}
 	}
@@ -587,19 +582,6 @@ func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(jobRun *models.ProwJobRun) 
 	res := r.db.DB.Raw(
 		"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? AND labels @> ARRAY['InfraFailure'] LIMIT 1",
 		jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).Scan(&found)
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
-}
-
-// releaseJobRunHasInfraFailureLabel reports whether the release_job_runs row for
-// the given prow job run already carries the InfraFailure label.
-func (r *ReEvaluator) releaseJobRunHasInfraFailureLabel(prowJobRunID uint) (bool, error) {
-	var found int
-	res := r.db.DB.Raw(
-		"SELECT 1 FROM release_job_runs WHERE prow_job_run_id = ? AND labels @> ARRAY['InfraFailure'] LIMIT 1",
-		prowJobRunID).Scan(&found)
 	if res.Error != nil {
 		return false, res.Error
 	}
