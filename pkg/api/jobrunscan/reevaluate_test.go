@@ -166,6 +166,54 @@ func TestMergeLabels(t *testing.T) {
 	}
 }
 
+func TestFilterInfraFailureLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   []string
+	}{
+		{
+			name:   "nil input",
+			labels: nil,
+			want:   nil,
+		},
+		{
+			name:   "no infra failure label",
+			labels: []string{"FlakeDetected", "DNSTimeout"},
+			want:   []string{"FlakeDetected", "DNSTimeout"},
+		},
+		{
+			name:   "infra failure removed, others kept",
+			labels: []string{"FlakeDetected", "InfraFailure", "DNSTimeout"},
+			want:   []string{"FlakeDetected", "DNSTimeout"},
+		},
+		{
+			name:   "only infra failure",
+			labels: []string{"InfraFailure"},
+			want:   nil,
+		},
+		{
+			name:   "order preserved",
+			labels: []string{"A", "InfraFailure", "B", "C"},
+			want:   []string{"A", "B", "C"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterInfraFailureLabel(tt.labels)
+			if !sameStrings(got, tt.want) {
+				t.Errorf("filterInfraFailureLabel() = %v, want %v", got, tt.want)
+			}
+			for _, l := range got {
+				if l == "InfraFailure" {
+					t.Errorf("filterInfraFailureLabel() retained InfraFailure: %v", got)
+				}
+			}
+		})
+	}
+}
+
 func TestUniqueSymptomsMatched(t *testing.T) {
 	matches := []symptomMatch{
 		{symptom: jobrunscan.Symptom{SymptomContent: jobrunscan.SymptomContent{ID: "s1"}}},

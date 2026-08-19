@@ -439,7 +439,9 @@ func TestOutputs(dbc *db.DB, release, test string, includedVariants, excludedVar
 		Where("prow_job_run_test_outputs.prow_job_run_test_timestamp > current_date - interval '14' day").
 		Where("prow_job_run_test_outputs.prow_job_run_test_release = ?", release).
 		Where("prow_job_runs.prow_job_release = ?", release).
-		Where("prow_job_runs.timestamp > current_date - interval '14' day")
+		Where("prow_job_runs.timestamp > current_date - interval '14' day").
+		// Exclude InfraFailure-labeled runs so their output does not surface here.
+		Where("prow_job_runs.labels IS NULL OR NOT (prow_job_runs.labels @> ARRAY['InfraFailure'])")
 
 	for _, variant := range includedVariants {
 		q = q.Where("prow_jobs.variant_combination_id IN (SELECT id FROM variant_combinations WHERE ? = any(variants))", variant)
@@ -470,9 +472,12 @@ func TestDurations(dbc *db.DB, release, test string, includedVariants, excludedV
 	q := dbc.DB.Table("prow_job_run_tests").
 		Joins("JOIN tests ON prow_job_run_tests.test_id = tests.id").
 		Joins("JOIN prow_jobs ON prow_jobs.id = prow_job_run_tests.prow_job_id").
+		Joins("JOIN prow_job_runs ON prow_job_run_tests.prow_job_run_id = prow_job_runs.id AND prow_job_runs.prow_job_release = prow_job_run_tests.prow_job_run_release").
 		Where("prow_job_run_tests.prow_job_run_timestamp > current_date - interval '14' day").
 		Where("prow_job_run_tests.test_id = (?)", testQuery).
-		Where("prow_job_run_tests.prow_job_run_release = ?", release)
+		Where("prow_job_run_tests.prow_job_run_release = ?", release).
+		// Exclude InfraFailure-labeled runs so they do not skew duration averages.
+		Where("prow_job_runs.labels IS NULL OR NOT (prow_job_runs.labels @> ARRAY['InfraFailure'])")
 
 	for _, variant := range includedVariants {
 		q = q.Where("prow_jobs.variant_combination_id IN (SELECT id FROM variant_combinations WHERE ? = any(variants))", variant)

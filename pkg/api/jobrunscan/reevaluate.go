@@ -21,6 +21,7 @@ import (
 	"github.com/openshift/sippy/pkg/bigquery/bqlabel"
 	jobrunannotator "github.com/openshift/sippy/pkg/componentreadiness/jobrunannotator"
 	"github.com/openshift/sippy/pkg/db"
+	"github.com/openshift/sippy/pkg/db/infrafailure"
 	"github.com/openshift/sippy/pkg/db/models"
 	"github.com/openshift/sippy/pkg/db/models/jobrunscan"
 	"github.com/openshift/sippy/pkg/db/query"
@@ -501,12 +502,18 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 	}
 
 	// Merge manual labels with new symptom labels
-	merged := pq.StringArray(mergeLabels(manualLabels, newBQLabels))
+	merged := mergeLabels(manualLabels, newBQLabels)
+
+	// InfraFailure must never be written to PostgreSQL by the re-evaluator. It
+	// is still recorded in BigQuery and GCS above; only the dedicated single
+	// handler sets it in PG, as part of the atomic summary-table subtraction
+	// (see pkg/db/infrafailure). Strip it from the set before every PG write.
+	pgLabels := pq.StringArray(filterInfraFailureLabel(merged))
 
 	// Update prow_job_runs
 	if err := r.db.DB.Model(&models.ProwJobRun{}).
 		Where("id = ? AND prow_job_release = ? AND timestamp = ?", jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).
-		Update("labels", merged).Error; err != nil {
+		Update("labels", pgLabels).Error; err != nil {
 		return fmt.Errorf("updating prow_job_runs.labels: %w", err)
 	}
 
@@ -517,13 +524,29 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 			return fmt.Errorf("looking up release_job_runs for build %s: %w", buildID, err)
 		}
 	} else {
-		if err := r.db.DB.Model(&releaseJobRun).Update("labels", merged).Error; err != nil {
+		if err := r.db.DB.Model(&releaseJobRun).Update("labels", pgLabels).Error; err != nil {
 			return fmt.Errorf("updating release_job_runs.labels: %w", err)
 		}
 	}
 
-	log.WithFields(log.Fields{"buildID": buildID, "labels": merged}).Debug("symptom reEval: updated PostgreSQL labels")
+	log.WithFields(log.Fields{"buildID": buildID, "labels": pgLabels}).Debug("symptom reEval: updated PostgreSQL labels")
 	return nil
+}
+
+// filterInfraFailureLabel returns labels with the InfraFailure label removed,
+// preserving the order of the remaining labels. The re-evaluator records
+// InfraFailure in BigQuery and GCS but must not persist it to PostgreSQL; that
+// is the sole responsibility of the single handler, which sets it atomically
+// alongside the summary-table subtraction (see pkg/db/infrafailure).
+func filterInfraFailureLabel(labels []string) []string {
+	filtered := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if l == infrafailure.LabelInfraFailure {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+	return filtered
 }
 
 // queryNonSymptomLabels queries BQ for labels that were NOT applied by symptom detection.
