@@ -492,11 +492,18 @@ func (r *ReEvaluator) clearGCSLabels(ctx context.Context, jobRunPath string) err
 }
 
 // updatePostgresLabels updates the labels array on prow_job_runs (and
-// release_job_runs if applicable). For prow_job_runs it never introduces the
-// InfraFailure label, but preserves it when the row already carries it (set by
-// RecordInfraFailure), so the full-array replace does not clobber it.
-// release_job_runs is not coupled to the summary-table subtraction, so it
-// receives the merged label set as-is.
+// release_job_runs if applicable) with the merged label set.
+//
+// For prow_job_runs the InfraFailure label is coupled to the summary-table
+// subtraction (see pkg/db/infrafailure): whenever the merged set carries
+// InfraFailure, the subtraction is performed inline via SubtractNewInfraFailure
+// (idempotent) inside the same row-locked transaction that replaces the labels
+// array. If PostgreSQL already carries InfraFailure but the merged set does not
+// (for example the BQ labels were cleared after RecordInfraFailure had already
+// applied it), the label is re-appended so the full-array replace does not
+// clobber it and break the "InfraFailure label in PostgreSQL == subtraction
+// done" invariant. release_job_runs is not coupled to the subtraction, so it
+// receives the merged set as-is.
 func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, jobRun *models.ProwJobRun, newBQLabels []models.JobRunLabel) error {
 	// Query BQ for existing non-symptom labels for this build ID
 	manualLabels, err := r.queryNonSymptomLabels(ctx, buildID, jobRun.Timestamp)
@@ -510,39 +517,40 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 	// Merge manual labels with new symptom labels
 	merged := mergeLabels(manualLabels, newBQLabels)
 
-	// InfraFailure must never be introduced by the re-evaluator: in PostgreSQL
-	// only RecordInfraFailure sets it, atomically alongside the summary-table
-	// subtraction (see pkg/db/infrafailure). Because the writes below fully
-	// replace the labels array, InfraFailure is stripped from the merged set
-	// unless the row already carries it, in which case it is preserved. The PG
-	// read is only worthwhile when the merged set actually contains InfraFailure:
-	// if it does not, there is nothing to strip or preserve, so use it as-is.
+	// The InfraFailure label in prow_job_runs is coupled to the summary-table
+	// subtraction (see pkg/db/infrafailure). Serialize the label read and the
+	// full-array-replace write against RecordInfraFailure by running both inside
+	// a single transaction that first takes a row lock (SELECT ... FOR UPDATE) on
+	// the prow_job_runs row. RecordInfraFailure acquires the same row lock via
+	// its conditional UPDATE, so the lock forces the two paths to run one after
+	// the other and keeps the "InfraFailure label in PostgreSQL == subtraction
+	// done" invariant intact.
 	mergedHasInfraFailure := slices.Contains(merged, infrafailure.LabelInfraFailure)
-
-	// Serialize the InfraFailure containment read and the full-array-replace
-	// write against RecordInfraFailure by running both inside a single
-	// transaction that first takes a row lock (SELECT ... FOR UPDATE) on the
-	// prow_job_runs row. RecordInfraFailure acquires the same row lock via its
-	// conditional UPDATE, so the lock forces the two paths to run one after the
-	// other. Without it, RecordInfraFailure could set InfraFailure (and perform
-	// its summary subtraction) between our read and our write, and the write
-	// would clobber the label -- violating the "InfraFailure label in PostgreSQL
-	// == subtraction done" invariant.
 	prowJobRunLabels := merged
 	if err := r.db.DB.Transaction(func(tx *gorm.DB) error {
-		var locked int
+		// Read (and lock) the current labels from the row so we can preserve an
+		// InfraFailure that RecordInfraFailure already applied.
+		var currentRun models.ProwJobRun
 		if err := tx.Raw(
-			"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? FOR UPDATE",
-			jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).Scan(&locked).Error; err != nil {
+			"SELECT labels FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? FOR UPDATE",
+			jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).Scan(&currentRun).Error; err != nil {
 			return fmt.Errorf("locking prow_job_runs row for build %s: %w", buildID, err)
 		}
 
 		if mergedHasInfraFailure {
-			alreadyInPG, err := r.prowJobRunHasInfraFailureLabel(tx, jobRun)
-			if err != nil {
-				return fmt.Errorf("checking prow_job_runs InfraFailure for build %s: %w", buildID, err)
+			// The merged set applies InfraFailure: perform the coupled summary
+			// subtraction now (idempotent -- a no-op if the row already carries
+			// the label). The label itself is written by the full-array replace
+			// below, so the merged set is used as-is.
+			if err := infrafailure.SubtractNewInfraFailure(tx, int64(jobRun.ID)); err != nil {
+				return fmt.Errorf("subtracting infra-failure summaries for build %s: %w", buildID, err)
 			}
-			prowJobRunLabels = excludeNewInfraFailure(merged, alreadyInPG)
+		} else if slices.Contains(currentRun.Labels, infrafailure.LabelInfraFailure) {
+			// PostgreSQL already carries InfraFailure but the merged set does not
+			// (its subtraction was done by RecordInfraFailure): preserve the
+			// label so the full-array replace does not clobber it and break the
+			// invariant.
+			prowJobRunLabels = append(prowJobRunLabels, infrafailure.LabelInfraFailure)
 		}
 
 		if err := tx.Model(&models.ProwJobRun{}).
@@ -572,44 +580,6 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 
 	log.WithFields(log.Fields{"buildID": buildID, "labels": pq.StringArray(prowJobRunLabels)}).Debug("symptom reEval: updated PostgreSQL labels")
 	return nil
-}
-
-// excludeNewInfraFailure returns the label set to persist to PostgreSQL. The
-// re-evaluator records InfraFailure in BigQuery and GCS, but in PostgreSQL that
-// label is owned solely by RecordInfraFailure, which sets it atomically with the
-// summary-table subtraction (see pkg/db/infrafailure). When the row already
-// carries InfraFailure (infraFailureAlreadyInPG) the labels are returned
-// unchanged so the existing label survives the full-array replace; otherwise
-// InfraFailure is stripped so the re-evaluator never introduces it.
-func excludeNewInfraFailure(labels []string, infraFailureAlreadyInPG bool) []string {
-	if infraFailureAlreadyInPG {
-		return labels
-	}
-	filtered := make([]string, 0, len(labels))
-	for _, l := range labels {
-		if l == infrafailure.LabelInfraFailure {
-			continue
-		}
-		filtered = append(filtered, l)
-	}
-	return filtered
-}
-
-// prowJobRunHasInfraFailureLabel reports whether the prow_job_runs row already
-// carries the InfraFailure label. It uses an array-containment query that returns
-// a single sentinel row when the label is present, so the full labels array is
-// never transferred just to test for one value. The query runs on the supplied
-// *gorm.DB so callers can execute it inside the row-locked transaction that
-// serializes with RecordInfraFailure.
-func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(tx *gorm.DB, jobRun *models.ProwJobRun) (bool, error) {
-	var found int
-	res := tx.Raw(
-		"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? AND labels @> ARRAY[?] LIMIT 1",
-		jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp, infrafailure.LabelInfraFailure).Scan(&found)
-	if res.Error != nil {
-		return false, res.Error
-	}
-	return res.RowsAffected > 0, nil
 }
 
 // queryNonSymptomLabels queries BQ for labels that were NOT applied by symptom detection.

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func TestRecordInfraFailureSubtractsFromSummaries(t *testing.T) {
 
 	// Record the infra failure for the first run. RecordInfraFailure opens its
 	// own transaction on the supplied connection.
-	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, infraRunID))
+	require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, infraRunID))
 
 	// The InfraFailure label is applied to the infra run (exercising the
 	// NULL-safe gate, since the run had no labels).
@@ -102,7 +103,7 @@ func TestRecordInfraFailureIsIdempotent(t *testing.T) {
 	require.NoError(t, dbc.DB.Where("name = ?", "infra-idem-test").First(&test).Error)
 
 	call := func() {
-		require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, runID))
+		require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, runID))
 	}
 
 	// First call subtracts the single run down to zero.
@@ -208,7 +209,7 @@ func TestRecordInfraFailureSubtractsFlakes(t *testing.T) {
 	require.Equal(t, int32(0), dt.Successes)
 	require.Equal(t, int32(0), dt.Failures)
 
-	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, infraRunID))
+	require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, infraRunID))
 
 	// Daily totals now reflect only the retained run's flake.
 	require.NoError(t, dbc.DB.Where("test_id = ? AND prow_job_id = ? AND release = ? AND date = ?", test.ID, jobID, "4.18", today).First(&dt).Error)
@@ -266,7 +267,7 @@ func TestRecordInfraFailureSubtractsEachTestIndependently(t *testing.T) {
 	require.Equal(t, int32(1), fetch(testA.ID).Successes)
 	require.Equal(t, int32(1), fetch(testB.ID).Failures)
 
-	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, infraRunID))
+	require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, infraRunID))
 
 	// Each test's row is subtracted independently by exactly that test's own
 	// contribution from the run.
@@ -327,7 +328,7 @@ func TestRecordInfraFailureScopedBySuite(t *testing.T) {
 	require.Equal(t, int32(1), fetch(suiteSerial.ID).Successes)
 
 	// Record the infra failure for the junit_e2e run only.
-	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, e2eRunID))
+	require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, e2eRunID))
 
 	// The junit_e2e suite is subtracted; junit_serial is untouched.
 	e2eDT := fetch(suiteE2E.ID)
@@ -355,7 +356,7 @@ func TestRecordInfraFailureNonexistentRunIsNoOp(t *testing.T) {
 	require.Equal(t, int64(0), count)
 
 	// No error despite the run not existing (conflated with already-labeled).
-	assert.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, missingRunID))
+	assert.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, missingRunID))
 
 	// The call did not create the run as a side effect.
 	require.NoError(t, dbc.DB.Model(&models.ProwJobRun{}).Where("id = ?", missingRunID).Count(&count).Error)
@@ -405,7 +406,7 @@ func TestRecordInfraFailureScopedByRelease(t *testing.T) {
 	require.Equal(t, int32(1), fetch("4.19").Successes)
 
 	// Record the infra failure for the 4.18 run only.
-	require.NoError(t, infrafailure.RecordInfraFailure(dbc.DB, infraRunID))
+	require.NoError(t, infrafailure.RecordInfraFailure(context.Background(), dbc.DB, infraRunID))
 
 	// The 4.18 release is subtracted; 4.19 is untouched.
 	dt418 := fetch("4.18")

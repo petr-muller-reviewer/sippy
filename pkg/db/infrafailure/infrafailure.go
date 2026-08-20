@@ -12,6 +12,7 @@
 package infrafailure
 
 import (
+	"context"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -117,15 +118,15 @@ WHERE cs.release = d.release
 
 // RecordInfraFailure marks a prow job run as an infrastructure failure and
 // removes its contribution from the pre-aggregated summary tables. It opens its
-// own transaction on dbc so the label set and the summary subtraction commit
-// (or roll back) atomically. dbc may be a plain database connection or an
-// existing transaction; gorm nests the latter as a savepoint.
+// own transaction on dbc (scoped to ctx) so the label set and the summary
+// subtraction commit (or roll back) atomically. dbc may be a plain database
+// connection or an existing transaction; gorm nests the latter as a savepoint.
 //
 // The operation is idempotent: if the run already carries the InfraFailure
 // label the function returns nil without touching the summary tables, because
 // the invariant guarantees the subtraction was already performed.
-func RecordInfraFailure(dbc *gorm.DB, prowJobRunID int64) error {
-	return dbc.Transaction(func(tx *gorm.DB) error {
+func RecordInfraFailure(ctx context.Context, dbc *gorm.DB, prowJobRunID int64) error {
+	return dbc.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return recordInfraFailureInTx(tx, prowJobRunID)
 	})
 }
@@ -149,6 +150,20 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID int64) error {
 	}
 	logger.Debug("set InfraFailure label on prow job run")
 
+	// The atomic gate passed (the label was newly applied), so remove the run's
+	// contribution from the summary tables in the same transaction.
+	return subtractFromSummaries(tx, prowJobRunID)
+}
+
+// subtractFromSummaries removes a single prow job run's test results from the
+// pre-aggregated summary tables (test_daily_totals and
+// test_cumulative_summaries). It does not touch the InfraFailure label: callers
+// own the label and any gating that decides whether the subtraction should run.
+// All work happens on the supplied transaction so it commits or rolls back
+// atomically with the caller's other writes.
+func subtractFromSummaries(tx *gorm.DB, prowJobRunID int64) error {
+	logger := log.WithField("prowJobRunID", prowJobRunID)
+
 	// Read the run's partition keys (release and timestamp) so the delta scan
 	// below can prune to the run's single partition instead of scanning every
 	// partition for the run id.
@@ -159,7 +174,7 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID int64) error {
 
 	// Drop any stale temp table before recreating it. ON COMMIT DROP ties the
 	// table's lifetime to the outermost transaction, not to a savepoint, so when
-	// RecordInfraFailure runs twice inside the same outer transaction (dbc is
+	// the subtraction runs twice inside the same outer transaction (tx is
 	// already a transaction, so gorm nests each call as a savepoint) the second
 	// CREATE would collide with the table left by the first. Dropping first makes
 	// the CREATE idempotent within the outer transaction.
@@ -190,4 +205,33 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID int64) error {
 	logger.WithField("rowsAffected", cumulativeRes.RowsAffected).Debug("subtracted infra-failure run from test_cumulative_summaries")
 
 	return nil
+}
+
+// SubtractNewInfraFailure removes a prow job run's contribution from the summary
+// tables when the run is being newly labeled InfraFailure, without setting the
+// label itself. It is the re-evaluator's entry point: the re-evaluator owns the
+// prow_job_runs.labels array (it fully replaces it) and applies InfraFailure
+// there, so this function must not touch the label.
+//
+// It is idempotent with respect to the summary subtraction. If the row already
+// carries the InfraFailure label the subtraction was already performed (the
+// invariant guarantees it), so this returns nil without touching the summary
+// tables. Otherwise it performs the subtraction on the supplied transaction.
+//
+// Callers must run this inside the same row-locked transaction that later
+// replaces the labels array so the containment check and the subtraction stay
+// consistent with a concurrent RecordInfraFailure.
+func SubtractNewInfraFailure(tx *gorm.DB, prowJobRunID int64) error {
+	var found int
+	res := tx.Raw(
+		"SELECT 1 FROM prow_job_runs WHERE id = ? AND labels @> ARRAY[?] LIMIT 1",
+		prowJobRunID, LabelInfraFailure).Scan(&found)
+	if res.Error != nil {
+		return fmt.Errorf("checking InfraFailure label on prow_job_run %d: %w", prowJobRunID, res.Error)
+	}
+	if res.RowsAffected > 0 {
+		log.WithField("prowJobRunID", prowJobRunID).Debug("prow job run already labeled InfraFailure; summary subtraction already applied, skipping")
+		return nil
+	}
+	return subtractFromSummaries(tx, prowJobRunID)
 }
