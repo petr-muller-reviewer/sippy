@@ -124,7 +124,7 @@ WHERE cs.release = d.release
 // The operation is idempotent: if the run already carries the InfraFailure
 // label the function returns nil without touching the summary tables, because
 // the invariant guarantees the subtraction was already performed.
-func RecordInfraFailure(dbc *gorm.DB, prowJobRunID uint) error {
+func RecordInfraFailure(dbc *gorm.DB, prowJobRunID int64) error {
 	return dbc.Transaction(func(tx *gorm.DB) error {
 		return recordInfraFailureInTx(tx, prowJobRunID)
 	})
@@ -133,7 +133,7 @@ func RecordInfraFailure(dbc *gorm.DB, prowJobRunID uint) error {
 // recordInfraFailureInTx performs the label set and summary subtraction on the
 // supplied transaction. Returning an error rolls back the transaction so
 // neither the label nor the subtraction persists, preserving the invariant.
-func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
+func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID int64) error {
 	logger := log.WithField("prowJobRunID", prowJobRunID)
 
 	// Conditional UPDATE as the first operation: set the label and acquire the
@@ -152,12 +152,19 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
 	// Read the run's partition keys (release and timestamp) so the delta scan
 	// below can prune to the run's single partition instead of scanning every
 	// partition for the run id.
-	//
-	// prowJobRunID is a prow_job_run primary key (a Postgres serial, always a
-	// small positive integer), so the uint->int64 conversion cannot overflow.
-	partKeys, err := query.LookupProwJobRunPartitionKeys(tx, int64(prowJobRunID)) // #nosec G115 -- serial primary key, never exceeds math.MaxInt64
+	partKeys, err := query.LookupProwJobRunPartitionKeys(tx, prowJobRunID)
 	if err != nil {
 		return fmt.Errorf("reading partition keys for prow_job_run %d: %w", prowJobRunID, err)
+	}
+
+	// Drop any stale temp table before recreating it. ON COMMIT DROP ties the
+	// table's lifetime to the outermost transaction, not to a savepoint, so when
+	// RecordInfraFailure runs twice inside the same outer transaction (dbc is
+	// already a transaction, so gorm nests each call as a savepoint) the second
+	// CREATE would collide with the table left by the first. Dropping first makes
+	// the CREATE idempotent within the outer transaction.
+	if err := tx.Exec("DROP TABLE IF EXISTS infra_failure_deltas").Error; err != nil {
+		return fmt.Errorf("dropping stale infra_failure_deltas temp table for prow_job_run %d: %w", prowJobRunID, err)
 	}
 
 	// Materialize the per-summary-key deltas once so both UPDATEs below read

@@ -449,7 +449,7 @@ func createBatchDeltas(ctx context.Context, tx pgx.Tx) error {
 			AND r.prow_job_release = tmp.prow_job_run_release
 			AND r.timestamp = tmp.prow_job_run_timestamp
 		LEFT JOIN suites s ON s.name = tmp.suite_name AND s.deleted_at IS NULL
-		WHERE r.labels IS NULL OR NOT (r.labels @> ARRAY['InfraFailure'])
+		WHERE (r.labels IS NULL OR NOT (r.labels @> ARRAY['InfraFailure']))
 		GROUP BY t.id, tmp.prow_job_id, COALESCE(s.id, 0), tmp.lifecycle,
 			tmp.prow_job_run_release, date(tmp.prow_job_run_timestamp)
 	`); err != nil {

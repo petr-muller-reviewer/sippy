@@ -519,18 +519,40 @@ func (r *ReEvaluator) updatePostgresLabels(ctx context.Context, buildID string, 
 	// if it does not, there is nothing to strip or preserve, so use it as-is.
 	mergedHasInfraFailure := slices.Contains(merged, infrafailure.LabelInfraFailure)
 
+	// Serialize the InfraFailure containment read and the full-array-replace
+	// write against RecordInfraFailure by running both inside a single
+	// transaction that first takes a row lock (SELECT ... FOR UPDATE) on the
+	// prow_job_runs row. RecordInfraFailure acquires the same row lock via its
+	// conditional UPDATE, so the lock forces the two paths to run one after the
+	// other. Without it, RecordInfraFailure could set InfraFailure (and perform
+	// its summary subtraction) between our read and our write, and the write
+	// would clobber the label -- violating the "InfraFailure label in PostgreSQL
+	// == subtraction done" invariant.
 	prowJobRunLabels := merged
-	if mergedHasInfraFailure {
-		alreadyInPG, err := r.prowJobRunHasInfraFailureLabel(jobRun)
-		if err != nil {
-			return fmt.Errorf("checking prow_job_runs InfraFailure for build %s: %w", buildID, err)
+	if err := r.db.DB.Transaction(func(tx *gorm.DB) error {
+		var locked int
+		if err := tx.Raw(
+			"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? FOR UPDATE",
+			jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).Scan(&locked).Error; err != nil {
+			return fmt.Errorf("locking prow_job_runs row for build %s: %w", buildID, err)
 		}
-		prowJobRunLabels = excludeNewInfraFailure(merged, alreadyInPG)
-	}
-	if err := r.db.DB.Model(&models.ProwJobRun{}).
-		Where("id = ? AND prow_job_release = ? AND timestamp = ?", jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).
-		Update("labels", pq.StringArray(prowJobRunLabels)).Error; err != nil {
-		return fmt.Errorf("updating prow_job_runs.labels: %w", err)
+
+		if mergedHasInfraFailure {
+			alreadyInPG, err := r.prowJobRunHasInfraFailureLabel(tx, jobRun)
+			if err != nil {
+				return fmt.Errorf("checking prow_job_runs InfraFailure for build %s: %w", buildID, err)
+			}
+			prowJobRunLabels = excludeNewInfraFailure(merged, alreadyInPG)
+		}
+
+		if err := tx.Model(&models.ProwJobRun{}).
+			Where("id = ? AND prow_job_release = ? AND timestamp = ?", jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).
+			Update("labels", pq.StringArray(prowJobRunLabels)).Error; err != nil {
+			return fmt.Errorf("updating prow_job_runs.labels: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Mirror the merged labels onto release_job_runs when this job run has a
@@ -576,12 +598,14 @@ func excludeNewInfraFailure(labels []string, infraFailureAlreadyInPG bool) []str
 // prowJobRunHasInfraFailureLabel reports whether the prow_job_runs row already
 // carries the InfraFailure label. It uses an array-containment query that returns
 // a single sentinel row when the label is present, so the full labels array is
-// never transferred just to test for one value.
-func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(jobRun *models.ProwJobRun) (bool, error) {
+// never transferred just to test for one value. The query runs on the supplied
+// *gorm.DB so callers can execute it inside the row-locked transaction that
+// serializes with RecordInfraFailure.
+func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(db *gorm.DB, jobRun *models.ProwJobRun) (bool, error) {
 	var found int
-	res := r.db.DB.Raw(
-		"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? AND labels @> ARRAY['InfraFailure'] LIMIT 1",
-		jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp).Scan(&found)
+	res := db.Raw(
+		"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? AND labels @> ARRAY[?] LIMIT 1",
+		jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp, infrafailure.LabelInfraFailure).Scan(&found)
 	if res.Error != nil {
 		return false, res.Error
 	}
