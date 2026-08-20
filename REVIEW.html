@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3922</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         line-height: 1.6; color: #1a1a1a; max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  code { background: #f2f2f2; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+  pre { background: #f6f6f6; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0.9rem 1rem;
+        overflow-x: auto; font-size: 0.88em; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  h3 { font-size: 1.02rem; margin-top: 1.4rem; margin-bottom: 0.3rem; }
+  .meta { color: #555; font-size: 0.92rem; margin-bottom: 1.2rem; }
+  .meta div { margin: 0.15rem 0; }
+  .verdict { background: #eef7ee; border-left: 4px solid #3a9d3a; padding: 0.8rem 1rem; border-radius: 4px; }
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+           padding: 0.15em 0.5em; border-radius: 3px; margin-right: 0.5em; }
+  .badge.nit { background: #eef2fb; color: #2b4a9b; }
+  .badge.blocking { background: #fbeaea; color: #a11; }
+  .badge.should-fix { background: #fdf3e2; color: #a06a00; }
+  .badge.question { background: #f1eefc; color: #5b3aa1; }
+  ul { padding-left: 1.3rem; }
+  a { color: #1a5fb4; }
+</style>
+</head>
+<body>
+
+<h1>Review: TRT-2884: exclude InfraFailure-labeled runs from summary tables</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3922">openshift/sippy#3922</a></div>
+  <div><strong>Head SHA:</strong> <code>c378683ee494191f4d4c096494a250eca62ccf53</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-20T16:49:03Z</div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict">
+  <strong>Approve.</strong> The PR has already been through several review/CodeRabbit rounds (race
+  condition, temp table, parenthesization, bind constant, int64 type) and the concerns raised there
+  check out as correctly addressed. The one remaining observation is a minor redundant-query
+  inefficiency, not a correctness issue.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds <code>pkg/db/infrafailure/infrafailure.go</code>: <code>RecordInfraFailure</code> (applies the InfraFailure label to a <code>prow_job_runs</code> row and subtracts its counts from summary tables, gated by a row-locked conditional UPDATE) and <code>SubtractNewInfraFailure</code> (idempotent variant used from the re-evaluator), plus shared <code>subtractFromSummaries</code>.</li>
+  <li>Wires inline subtraction into <code>pkg/api/jobrunscan/reevaluate.go</code>'s <code>updatePostgresLabels</code>: reads+locks the <code>prow_job_runs</code> row (<code>SELECT ... FOR UPDATE</code>), then either runs <code>SubtractNewInfraFailure</code> or preserves an existing InfraFailure label so the full-array label replace doesn't clobber it.</li>
+  <li>Adds InfraFailure exclusion filters to <code>pgwriter.go</code>, <code>dailysummary.go</code>, and <code>test_queries.go</code>/<code>job_queries.go</code> so summary tables stay consistent with the label.</li>
+  <li>Changes <code>LookupProwJobRunPartitionKeys</code> signature (int64 partition key, gosec G115 fix) and threads <code>context.Context</code> through the affected call paths.</li>
+  <li>Adds <code>test/integration/infrafailure_test.go</code> (419 lines) covering gap/idempotency scenarios.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="badge nit">Nit</span>SubtractNewInfraFailure re-checks a fact already known from the row lock</h3>
+<p><code>pkg/api/jobrunscan/reevaluate.go:526-545</code>, <code>pkg/db/infrafailure/infrafailure.go:224-237</code></p>
+<p><code>updatePostgresLabels</code> already does <code>SELECT labels ... FOR UPDATE</code> into <code>currentRun</code>
+and evaluates <code>slices.Contains(currentRun.Labels, infrafailure.LabelInfraFailure)</code> for the
+preserve-label branch. When <code>mergedHasInfraFailure</code> is true, it calls
+<code>infrafailure.SubtractNewInfraFailure(tx, ...)</code>, which independently re-runs a
+<code>SELECT 1 FROM prow_job_runs WHERE id = ? AND labels @&gt; ARRAY[?]</code> on the same row inside the
+same transaction. The row lock guarantees this can't have changed since the first read, so this is a
+pure extra round-trip per re-evaluation call &mdash; not a correctness issue. Could pass the
+already-known containment as a parameter instead of re-querying it.</p>
+<pre>mergedHasInfraFailure := slices.Contains(merged, infrafailure.LabelInfraFailure)
+...
+if mergedHasInfraFailure {
+    if err := infrafailure.SubtractNewInfraFailure(tx, int64(jobRun.ID)); err != nil {
+...
+func SubtractNewInfraFailure(tx *gorm.DB, prowJobRunID int64) error {
+    var found int
+    res := tx.Raw(
+        "SELECT 1 FROM prow_job_runs WHERE id = ? AND labels @&gt; ARRAY[?] LIMIT 1",
+        prowJobRunID, LabelInfraFailure).Scan(&amp;found)</pre>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>GORM <code>.Where()</code> OR-clause parenthesization: <code>clause.Where.Build</code> auto-wraps multi-clause <code>Expr</code> containing "or" in parens &mdash; correct.</li>
+  <li><code>RowsAffected</code> semantics on the raw <code>SELECT ... Scan</code> in <code>SubtractNewInfraFailure</code> &mdash; behaves as intended for the idempotency check.</li>
+  <li><code>INNER JOIN tmp_prow_job_runs</code> batch-delta exclusion logic in the temp-table path &mdash; correct.</li>
+  <li>Alleged partition-wise-join risk in <code>dailysummary.go</code>/<code>test_queries.go</code> &mdash; <code>prow_job_runs</code> is not a physically partitioned table, so the join-pruning concern doesn't apply.</li>
+  <li><code>LookupProwJobRunPartitionKeys</code> int64 change correctly addresses gosec G115.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>None outstanding &mdash; prior CodeRabbit rounds already covered race condition, temp table, parenthesization, bind constant, and int64 type concerns, all addressed in <code>b676f7813</code>. Optionally: would you consider having <code>SubtractNewInfraFailure</code> accept the already-known label-containment boolean from <code>updatePostgresLabels</code> to skip the redundant re-query?</li>
+</ul>
+
+</body>
+</html>
