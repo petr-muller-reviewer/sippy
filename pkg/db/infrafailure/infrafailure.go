@@ -152,7 +152,10 @@ func recordInfraFailureInTx(tx *gorm.DB, prowJobRunID uint) error {
 	// Read the run's partition keys (release and timestamp) so the delta scan
 	// below can prune to the run's single partition instead of scanning every
 	// partition for the run id.
-	partKeys, err := query.LookupProwJobRunPartitionKeys(tx, int64(prowJobRunID))
+	//
+	// prowJobRunID is a prow_job_run primary key (a Postgres serial, always a
+	// small positive integer), so the uint->int64 conversion cannot overflow.
+	partKeys, err := query.LookupProwJobRunPartitionKeys(tx, int64(prowJobRunID)) // #nosec G115 -- serial primary key, never exceeds math.MaxInt64
 	if err != nil {
 		return fmt.Errorf("reading partition keys for prow_job_run %d: %w", prowJobRunID, err)
 	}
