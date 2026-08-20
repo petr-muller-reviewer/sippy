@@ -601,9 +601,9 @@ func excludeNewInfraFailure(labels []string, infraFailureAlreadyInPG bool) []str
 // never transferred just to test for one value. The query runs on the supplied
 // *gorm.DB so callers can execute it inside the row-locked transaction that
 // serializes with RecordInfraFailure.
-func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(db *gorm.DB, jobRun *models.ProwJobRun) (bool, error) {
+func (r *ReEvaluator) prowJobRunHasInfraFailureLabel(tx *gorm.DB, jobRun *models.ProwJobRun) (bool, error) {
 	var found int
-	res := db.Raw(
+	res := tx.Raw(
 		"SELECT 1 FROM prow_job_runs WHERE id = ? AND prow_job_release = ? AND timestamp = ? AND labels @> ARRAY[?] LIMIT 1",
 		jobRun.ID, jobRun.ProwJobRelease, jobRun.Timestamp, infrafailure.LabelInfraFailure).Scan(&found)
 	if res.Error != nil {
