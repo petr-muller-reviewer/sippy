@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3884</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    background: #fdfdfd;
+  }
+  code, pre, .mono {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  header {
+    border-bottom: 2px solid #333;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  header table { border-collapse: collapse; }
+  header td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+  header td:first-child { font-weight: 600; color: #555; white-space: nowrap; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2.2rem;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1rem; margin-top: 1.4rem; margin-bottom: 0.4rem; }
+  .verdict-box {
+    background: #fff3e0;
+    border-left: 4px solid #e65100;
+    padding: 0.8rem 1rem;
+    border-radius: 0 4px 4px 0;
+    margin-bottom: 1.5rem;
+  }
+  .verdict-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #e65100; }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left: 4px solid #c62828; }
+  .finding.should-fix { border-left: 4px solid #f9a825; }
+  .finding.nit { border-left: 4px solid #757575; }
+  .finding.question { border-left: 4px solid #1565c0; }
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    color: #fff;
+  }
+  .badge.blocking { background: #c62828; }
+  .badge.should-fix { background: #f9a825; color: #3a2a00; }
+  .badge.nit { background: #757575; }
+  .badge.question { background: #1565c0; }
+  .loc { color: #555; margin: 0.3rem 0; }
+  ul.tight li { margin-bottom: 0.4rem; }
+  .example { background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px; padding: 0.6rem 0.9rem; margin-top: 0.5rem; }
+  a { color: #1565c0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: Combined CR query with materialized CTEs</h1>
+  <table>
+    <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3884">openshift/sippy#3884</a></td></tr>
+    <tr><td>Head SHA</td><td class="mono">5fdcc5e071b18d889475b1f6841536aa800da8de</td></tr>
+    <tr><td>Base</td><td class="mono">main</td></tr>
+    <tr><td>Reviewed at</td><td class="mono">2026-08-08T13:24:11Z</td></tr>
+  </table>
+</header>
+
+<div class="verdict-box">
+  <div class="verdict-label">Request changes</div>
+  <p>The SQL rewrite collapsing the old self-join into a grouped CASE-WHEN prefix-sum aggregation drops <code>prow_job_id</code> and <code>lifecycle</code> from the <code>GROUP BY</code>, which can corrupt <code>total_count</code>/<code>success_count</code>/<code>flake_count</code> whenever a summary key exists at one end of the lookup window but not the other (e.g. a lifecycle reclassification) &mdash; this needs to be fixed or explicitly ruled out before merge. The remaining findings are duplication/maintainability concerns, not correctness blockers.</p>
+</div>
+
+<h2>What this PR does</h2>
+<ul class="tight">
+  <li>Introduces <code>queryCombinedTestStatus</code>, which folds the sample and base test-status queries into a single SQL statement using two materialized CTEs (<code>sample_agg</code>, <code>base_agg</code>) joined via <code>UNION ALL</code>, instead of running them as two separate queries.</li>
+  <li>Goal: eliminate concurrent partition scans / buffer cache contention from running sample and base queries in parallel against the same tables.</li>
+  <li>Rewrites the prefix-sum base-status query (<code>prefixSumSpec</code>) from a self-join pairing each key's start/end row to a grouped <code>SUM(CASE WHEN date = end ...) - SUM(CASE WHEN date = start ...)</code> aggregation.</li>
+  <li>Refactors join/filter construction (<code>prepareVariantQuery</code>, <code>buildInnerAggregation</code>, <code>buildStatusCTE</code>) but duplicates parts of it inline for the new combined path rather than fully reusing the existing helpers.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+<div class="finding blocking">
+  <span class="badge blocking">Blocking</span>
+  <strong>prefixSumSpec GROUP BY drops prow_job_id/lifecycle, corrupting totals when a key vanishes across the window</strong>
+  <div class="loc">
+    <code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:150</code> (GROUP BY),
+    <code>cr_queries.go:272-289</code> (prefixSumSpec CASE-WHEN)
+  </div>
+  <pre>// buildInnerAggregation, cr_queries.go:150
+GROUP BY e.test_id, e.suite_id, vg.group_id%s
+
+// prefixSumSpec, cr_queries.go:277-284
+selectCols: `SUM(CASE WHEN e.date = ? THEN e.prefix_sum_runs ELSE 0 END)
+  - SUM(CASE WHEN e.date = ? THEN e.prefix_sum_runs ELSE 0 END) AS total_count, ...`</pre>
+  <p><code>buildInnerAggregation</code>'s <code>GROUP BY</code> (test_id, suite_id, variant_group_id &mdash; no <code>prow_job_id</code>/<code>lifecycle</code>) is shared by <code>prefixSumSpec</code>, which computes <code>SUM(end) - SUM(start)</code> across the whole group. The prior self-join paired each <span class="mono">(test_id, prow_job_id, suite_id, lifecycle)</span> key's own start/end rows before subtracting. Now, a key present only at <code>lookupStart</code> (e.g. because it was reclassified to a new lifecycle key, which <code>pkg/db/cumulativesummary/cumulative_summary.go</code>'s delete+insert design explicitly anticipates) still contributes its full start-of-window value to the group sum with nothing at <code>lookupEnd</code> to offset it.</p>
+  <div class="example">
+    <strong>Worked example:</strong> a test's lifecycle reclassifies from <em>blocking</em> to <em>informing</em> mid-window. Old key: <code>prefix_sum_runs=500</code> at lookupStart, no row at lookupEnd. New key: <code>prefix_sum_runs=50</code> at lookupEnd only.<br>
+    Old (self-join) result: <code>50 - 0 = 50</code> &mdash; correct.<br>
+    New (grouped CASE-WHEN) result: <code>SUM(end)=50, SUM(start)=500 &rarr; total_count = 50 - 500 = -450</code>.<br>
+    Via <code>WHERE agg.total_count &gt; 0</code> this can also silently drop real data (MissingSample/MissingBasis) or understate counts when other jobs in the same group are positive.
+  </div>
+</div>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span>
+  <strong>prow_jobs join template duplicated verbatim between two functions</strong>
+  <div class="loc"><code>cr_queries.go:246-250</code> (inline in <code>queryTestStatusCTE</code>) vs <code>cr_queries.go:446-451</code> (<code>prowJobJoinTemplate</code> in <code>queryCombinedTestStatus</code>)</div>
+  <pre>JOIN prow_jobs pj ON pj.id = e.prow_job_id
+                AND pj.deleted_at IS NULL
+                AND pj.variant_combination_id IN (%s)
+            JOIN vg ON vg.vcid = pj.variant_combination_id</pre>
+  <p>Identical join predicate exists in two places with no shared constant/helper. A future edit to the join is easy to apply once and miss in the other copy.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span>
+  <strong>Combined-query SQL text and bind-arg slice synchronized only by hand-written comments</strong>
+  <div class="loc"><code>cr_queries.go:460-478</code></div>
+  <pre>fullSQL := fmt.Sprintf("WITH vg(vcid, group_id) AS (%s), ... UNION ALL ... UNION ALL ... UNION ALL %s", ...)
+var allArgs []any
+allArgs = append(allArgs, sampleCTEArgs...)
+allArgs = append(allArgs, baseCTEArgs...)
+allArgs = append(allArgs, "S", minimumFailure)
+allArgs = append(allArgs, "S")
+allArgs = append(allArgs, "B", minimumFailure)
+allArgs = append(allArgs, "B")</pre>
+  <p>Nothing structurally pairs the 4 UNION ALL branches to their positions in <code>allArgs</code>. Reordering/adding/removing a branch requires remembering to update the arg slice in lockstep elsewhere in the function &mdash; a mismatch produces wrong bindings or a runtime arg-count error, uncaught by any existing test.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span>
+  <strong>Base/GA-window branching logic duplicated across two call sites</strong>
+  <div class="loc"><code>cr_queries.go:397-410</code> (<code>queryCombinedTestStatus</code>) vs <code>provider.go:294-306</code> (<code>QueryBaseTestStatus</code>)</div>
+  <pre>baseIsGA := p.baseMatchesGAWindow(ctx, baseRelease, baseRange)
+var baseSpec testStatusSpec
+if baseIsGA {
+    baseSpec = gaSpec(baseRelease, baseWindowDays)
+} else {
+    baseSpec = prefixSumSpec(baseRelease, baseLookupEnd, baseLookupStart, nil)
+}</pre>
+  <p>Both places independently decide <code>gaSpec</code> vs <code>prefixSumSpec</code>. A future change to GA-window eligibility applied to one call site and missed in the other would make the combined and releasefallback paths silently disagree for the same release.</p>
+</div>
+
+<div class="finding should-fix">
+  <span class="badge should-fix">Should fix</span>
+  <strong>queryCombinedTestStatus hand-rolls variant lookup/filter construction instead of reusing prepareVariantQuery</strong>
+  <div class="loc"><code>cr_queries.go:416-451</code></div>
+  <pre>sampleLookup, err := lookupVariantValues(ctx, p.dbc, sampleIncludeVariants, dbGroupBy)
+...
+sampleFilterClause, sampleFilterArgs := buildVariantFilterClause(sampleIncludeVariants)
+sampleVarSubquery := "SELECT vc.id FROM variant_combinations vc"
+if sampleFilterClause != "" { sampleVarSubquery += " WHERE " + sampleFilterClause }</pre>
+  <p><code>prepareVariantQuery</code> already encapsulates this exact bundle for the standalone path. A bug fix to <code>buildVariantFilterClause</code> semantics or similar is easy to apply there and forget to mirror in this inlined equivalent.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="tight">
+  <li>BigQuery provider parity: this PR only touches the Postgres provider; no BigQuery-side aggregation logic changed. (Worth separately checking whether BigQuery's equivalent aggregation has the same start/end-pairing assumption as the blocking finding above.)</li>
+  <li>No obvious formatting issues in the modified file.</li>
+  <li>The shared <code>failureBranchTemplate</code>/<code>placeholderBranchTemplate</code> UNION branch templates are unchanged and correctly shared, not duplicated.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul class="tight">
+  <li>Is dropping <code>prow_job_id</code>/<code>lifecycle</code> from the <code>GROUP BY</code> (cr_queries.go:150) intentional &mdash; is there a reason lifecycle reclassification can't happen within a lookup window in practice &mdash; or is this a regression from collapsing the self-join into CASE-WHEN aggregation?</li>
+  <li>Was this rewrite validated against the old self-join query's output on a dataset that includes a lifecycle transition or variant-combination change within the base/sample window?</li>
+  <li>Given the duplication between the two prow_jobs join templates, would it make sense to extract a single shared helper while both call sites are fresh?</li>
+</ul>
+
+</body>
+</html>
