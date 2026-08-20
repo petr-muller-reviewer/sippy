@@ -42,13 +42,13 @@
   }
   h3 { font-size: 1rem; margin-top: 1.4rem; margin-bottom: 0.4rem; }
   .verdict-box {
-    background: #fff3e0;
-    border-left: 4px solid #e65100;
+    background: #e8f5e9;
+    border-left: 4px solid #2e7d32;
     padding: 0.8rem 1rem;
     border-radius: 0 4px 4px 0;
     margin-bottom: 1.5rem;
   }
-  .verdict-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #e65100; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #2e7d32; }
   .finding {
     border: 1px solid #e0e0e0;
     border-radius: 6px;
@@ -59,6 +59,7 @@
   .finding.should-fix { border-left: 4px solid #f9a825; }
   .finding.nit { border-left: 4px solid #757575; }
   .finding.question { border-left: 4px solid #1565c0; }
+  .finding.resolved { border-left: 4px solid #2e7d32; opacity: 0.9; }
   .badge {
     display: inline-block;
     font-size: 0.72rem;
@@ -74,9 +75,15 @@
   .badge.should-fix { background: #f9a825; color: #3a2a00; }
   .badge.nit { background: #757575; }
   .badge.question { background: #1565c0; }
+  .badge.resolved { background: #2e7d32; }
+  .badge.disputed { background: #6a1b9a; }
+  .badge.verified-ok { background: #2e7d32; }
   .loc { color: #555; margin: 0.3rem 0; }
   ul.tight li { margin-bottom: 0.4rem; }
   .example { background: #fff8e1; border: 1px solid #ffe082; border-radius: 4px; padding: 0.6rem 0.9rem; margin-top: 0.5rem; }
+  .dispute { background: #f3e5f5; border: 1px solid #ce93d8; border-radius: 4px; padding: 0.6rem 0.9rem; margin-top: 0.5rem; }
+  .verified { background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 4px; padding: 0.6rem 0.9rem; margin-top: 0.5rem; }
+  .refresh-log { background: #e8f4fd; border: 1px solid #90caf9; border-radius: 4px; padding: 0.6rem 0.9rem; margin: 1rem 0; font-size: 0.92em; }
   a { color: #1565c0; }
 </style>
 </head>
@@ -86,15 +93,19 @@
   <h1>Review: Combined CR query with materialized CTEs</h1>
   <table>
     <tr><td>PR</td><td><a href="https://github.com/openshift/sippy/pull/3884">openshift/sippy#3884</a></td></tr>
-    <tr><td>Head SHA</td><td class="mono">5fdcc5e071b18d889475b1f6841536aa800da8de</td></tr>
+    <tr><td>Head SHA</td><td class="mono">2d9f0e2ff49ed2466ac988b018187530012a8980</td></tr>
     <tr><td>Base</td><td class="mono">main</td></tr>
-    <tr><td>Reviewed at</td><td class="mono">2026-08-08T13:24:11Z</td></tr>
+    <tr><td>Reviewed at</td><td class="mono">2026-08-20T16:08:18Z</td></tr>
   </table>
 </header>
 
+<div class="refresh-log">
+  <strong>Consolidated refresh</strong> covering all activity from the original review (2026-08-08T13:24:11Z, <code class="mono">5fdcc5e071b1</code>) through 2026-08-20. The blocking finding was disputed by the author and independently verified as not-a-bug (see Resolved section). All should-fix duplication findings the author addressed are resolved; all CodeRabbit findings were fixed or explained and CodeRabbit approved. Verdict changed from <strong>request-changes</strong> to <strong>approve</strong>.
+</div>
+
 <div class="verdict-box">
-  <div class="verdict-label">Request changes</div>
-  <p>The SQL rewrite collapsing the old self-join into a grouped CASE-WHEN prefix-sum aggregation drops <code>prow_job_id</code> and <code>lifecycle</code> from the <code>GROUP BY</code>, which can corrupt <code>total_count</code>/<code>success_count</code>/<code>flake_count</code> whenever a summary key exists at one end of the lookup window but not the other (e.g. a lifecycle reclassification) &mdash; this needs to be fixed or explicitly ruled out before merge. The remaining findings are duplication/maintainability concerns, not correctness blockers.</p>
+  <div class="verdict-label">Approve</div>
+  <p>The original blocking concern (grouped CASE-WHEN prefix-sum losing the self-join's per-key start/end pairing) was verified against both cumulative-summary write paths and does not hold in practice: every key, once created, persists (flat if inactive) on every later date, so the row shape it assumed can't occur. All duplication findings the author chose to address are resolved, and every CodeRabbit finding was fixed or explained to CodeRabbit's satisfaction (final state: APPROVED). Two should-fix duplication/maintainability items remain open but are not correctness blockers.</p>
 </div>
 
 <h2>What this PR does</h2>
@@ -102,66 +113,23 @@
   <li>Introduces <code>queryCombinedTestStatus</code>, which folds the sample and base test-status queries into a single SQL statement using two materialized CTEs (<code>sample_agg</code>, <code>base_agg</code>) joined via <code>UNION ALL</code>, instead of running them as two separate queries.</li>
   <li>Goal: eliminate concurrent partition scans / buffer cache contention from running sample and base queries in parallel against the same tables.</li>
   <li>Rewrites the prefix-sum base-status query (<code>prefixSumSpec</code>) from a self-join pairing each key's start/end row to a grouped <code>SUM(CASE WHEN date = end ...) - SUM(CASE WHEN date = start ...)</code> aggregation.</li>
-  <li>Refactors join/filter construction (<code>prepareVariantQuery</code>, <code>buildInnerAggregation</code>, <code>buildStatusCTE</code>) but duplicates parts of it inline for the new combined path rather than fully reusing the existing helpers.</li>
+  <li>Refactors join/filter construction (<code>prepareVariantQuery</code>, <code>buildInnerAggregation</code>, <code>buildStatusCTE</code>).</li>
+</ul>
+<p><strong>Since original review:</strong></p>
+<ul class="tight">
+  <li>Author extracted the previously-duplicated prow_jobs join and variant-filter/lookup construction into shared helpers (<code>prowJobVariantJoin</code>, <code>resolveVariantFilter</code> in <code>variants.go</code>).</li>
+  <li>Author replaced an untyped bind-parameter source tag in the combined query's UNION branches with typed literals, fixing a CodeRabbit-flagged potential Postgres type-inference error and incidentally shrinking the hand-synced arg list.</li>
+  <li>Per-request Info-level logs in the combined query path were lowered to Debug.</li>
 </ul>
 
 <h2>Findings</h2>
 
-<h3>Blocking</h3>
-<div class="finding blocking">
-  <span class="badge blocking">Blocking</span>
-  <strong>prefixSumSpec GROUP BY drops prow_job_id/lifecycle, corrupting totals when a key vanishes across the window</strong>
-  <div class="loc">
-    <code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:150</code> (GROUP BY),
-    <code>cr_queries.go:272-289</code> (prefixSumSpec CASE-WHEN)
-  </div>
-  <pre>// buildInnerAggregation, cr_queries.go:150
-GROUP BY e.test_id, e.suite_id, vg.group_id%s
-
-// prefixSumSpec, cr_queries.go:277-284
-selectCols: `SUM(CASE WHEN e.date = ? THEN e.prefix_sum_runs ELSE 0 END)
-  - SUM(CASE WHEN e.date = ? THEN e.prefix_sum_runs ELSE 0 END) AS total_count, ...`</pre>
-  <p><code>buildInnerAggregation</code>'s <code>GROUP BY</code> (test_id, suite_id, variant_group_id &mdash; no <code>prow_job_id</code>/<code>lifecycle</code>) is shared by <code>prefixSumSpec</code>, which computes <code>SUM(end) - SUM(start)</code> across the whole group. The prior self-join paired each <span class="mono">(test_id, prow_job_id, suite_id, lifecycle)</span> key's own start/end rows before subtracting. Now, a key present only at <code>lookupStart</code> (e.g. because it was reclassified to a new lifecycle key, which <code>pkg/db/cumulativesummary/cumulative_summary.go</code>'s delete+insert design explicitly anticipates) still contributes its full start-of-window value to the group sum with nothing at <code>lookupEnd</code> to offset it.</p>
-  <div class="example">
-    <strong>Worked example:</strong> a test's lifecycle reclassifies from <em>blocking</em> to <em>informing</em> mid-window. Old key: <code>prefix_sum_runs=500</code> at lookupStart, no row at lookupEnd. New key: <code>prefix_sum_runs=50</code> at lookupEnd only.<br>
-    Old (self-join) result: <code>50 - 0 = 50</code> &mdash; correct.<br>
-    New (grouped CASE-WHEN) result: <code>SUM(end)=50, SUM(start)=500 &rarr; total_count = 50 - 500 = -450</code>.<br>
-    Via <code>WHERE agg.total_count &gt; 0</code> this can also silently drop real data (MissingSample/MissingBasis) or understate counts when other jobs in the same group are positive.
-  </div>
-</div>
-
-<h3>Should fix</h3>
-
-<div class="finding should-fix">
-  <span class="badge should-fix">Should fix</span>
-  <strong>prow_jobs join template duplicated verbatim between two functions</strong>
-  <div class="loc"><code>cr_queries.go:246-250</code> (inline in <code>queryTestStatusCTE</code>) vs <code>cr_queries.go:446-451</code> (<code>prowJobJoinTemplate</code> in <code>queryCombinedTestStatus</code>)</div>
-  <pre>JOIN prow_jobs pj ON pj.id = e.prow_job_id
-                AND pj.deleted_at IS NULL
-                AND pj.variant_combination_id IN (%s)
-            JOIN vg ON vg.vcid = pj.variant_combination_id</pre>
-  <p>Identical join predicate exists in two places with no shared constant/helper. A future edit to the join is easy to apply once and miss in the other copy.</p>
-</div>
-
-<div class="finding should-fix">
-  <span class="badge should-fix">Should fix</span>
-  <strong>Combined-query SQL text and bind-arg slice synchronized only by hand-written comments</strong>
-  <div class="loc"><code>cr_queries.go:460-478</code></div>
-  <pre>fullSQL := fmt.Sprintf("WITH vg(vcid, group_id) AS (%s), ... UNION ALL ... UNION ALL ... UNION ALL %s", ...)
-var allArgs []any
-allArgs = append(allArgs, sampleCTEArgs...)
-allArgs = append(allArgs, baseCTEArgs...)
-allArgs = append(allArgs, "S", minimumFailure)
-allArgs = append(allArgs, "S")
-allArgs = append(allArgs, "B", minimumFailure)
-allArgs = append(allArgs, "B")</pre>
-  <p>Nothing structurally pairs the 4 UNION ALL branches to their positions in <code>allArgs</code>. Reordering/adding/removing a branch requires remembering to update the arg slice in lockstep elsewhere in the function &mdash; a mismatch produces wrong bindings or a runtime arg-count error, uncaught by any existing test.</p>
-</div>
+<h3>Should fix (still open)</h3>
 
 <div class="finding should-fix">
   <span class="badge should-fix">Should fix</span>
   <strong>Base/GA-window branching logic duplicated across two call sites</strong>
-  <div class="loc"><code>cr_queries.go:397-410</code> (<code>queryCombinedTestStatus</code>) vs <code>provider.go:294-306</code> (<code>QueryBaseTestStatus</code>)</div>
+  <div class="loc"><code>cr_queries.go:380-393</code> (<code>queryCombinedTestStatus</code>) vs <code>provider.go</code> (<code>QueryBaseTestStatus</code>)</div>
   <pre>baseIsGA := p.baseMatchesGAWindow(ctx, baseRelease, baseRange)
 var baseSpec testStatusSpec
 if baseIsGA {
@@ -169,33 +137,137 @@ if baseIsGA {
 } else {
     baseSpec = prefixSumSpec(baseRelease, baseLookupEnd, baseLookupStart, nil)
 }</pre>
-  <p>Both places independently decide <code>gaSpec</code> vs <code>prefixSumSpec</code>. A future change to GA-window eligibility applied to one call site and missed in the other would make the combined and releasefallback paths silently disagree for the same release.</p>
+  <p>Both places independently decide <code>gaSpec</code> vs <code>prefixSumSpec</code>. A future change to GA-window eligibility applied to one call site and missed in the other would make the combined and releasefallback paths silently disagree for the same release. Not addressed by any commit or comment in this PR; not a merge blocker.</p>
 </div>
 
 <div class="finding should-fix">
-  <span class="badge should-fix">Should fix</span>
+  <span class="badge should-fix">Should fix (partially resolved)</span>
+  <strong>Combined-query SQL text and bind-arg slice synchronized only by hand-written comments</strong>
+  <div class="loc"><code>cr_queries.go:432-444</code></div>
+  <pre>fullSQL := fmt.Sprintf("WITH vg(vcid, group_id) AS (%s), ... UNION ALL ... UNION ALL ... UNION ALL %s", ...)
+var allArgs []any
+allArgs = append(allArgs, sampleCTEArgs...)
+allArgs = append(allArgs, baseCTEArgs...)
+allArgs = append(allArgs, minimumFailure) // sample failure branch
+allArgs = append(allArgs, minimumFailure) // base failure branch</pre>
+  <p>Originally, a <code>"? AS source, "</code> bind placeholder was injected per branch, with <code>allArgs</code> hand-assembled in matching order (6 literal appends). CodeRabbit separately flagged that an untyped <code>?</code> in a UNION ALL select list can hit Postgres error 42P18; the author's fix (typed literals <code>'S'::text AS source</code> / <code>'B'::text AS source</code>) dropped 4 of those 6 appends as a side effect. The remaining 2-arg-per-4-branch pairing is still hand-maintained, not structurally enforced, but the surface area for a reordering mistake is meaningfully smaller than originally filed.</p>
+</div>
+
+<h2>Resolved</h2>
+
+<div class="finding blocking resolved">
+  <span class="badge verified-ok">Verified: not a bug</span>
+  <strong>prefixSumSpec GROUP BY drops prow_job_id/lifecycle, corrupting totals when a key vanishes across the window</strong>
+  <div class="loc">
+    <code>pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:137</code> (GROUP BY),
+    <code>cr_queries.go:255-</code> (prefixSumSpec CASE-WHEN)
+  </div>
+  <p><strong>Original concern:</strong> <code>buildInnerAggregation</code>'s <code>GROUP BY</code> (test_id, suite_id, variant_group_id &mdash; no <code>prow_job_id</code>/<code>lifecycle</code>) is shared by <code>prefixSumSpec</code>, which computes <code>SUM(end) - SUM(start)</code> across the whole group. The prior self-join paired each <span class="mono">(test_id, prow_job_id, suite_id, lifecycle)</span> key's own start/end rows before subtracting. Worry: a key present only at <code>lookupStart</code> (e.g. reclassified to a new lifecycle key) would still contribute its full start-of-window value to the group sum with nothing at <code>lookupEnd</code> to offset it.</p>
+  <div class="example">
+    <strong>Worked example (as originally filed; premise since shown false &mdash; see verification):</strong> a test's lifecycle reclassifies from <em>blocking</em> to <em>informing</em> mid-window. Old key: <code>prefix_sum_runs=500</code> at lookupStart, assumed no row at lookupEnd. New key: <code>prefix_sum_runs=50</code> at lookupEnd only.<br>
+    Old (self-join) result: <code>50 - 0 = 50</code> &mdash; correct.<br>
+    Grouped CASE-WHEN result under the assumed (incorrect) row shape: <code>SUM(end)=50, SUM(start)=500 &rarr; total_count = 50 - 500 = -450</code>.
+  </div>
+  <div class="dispute">
+    <span class="badge disputed">Author response</span>
+    <p><strong>mstaeble, 2026-08-19:</strong> The self-join and the grouped CASE-WHEN only diverge when a key has a lookupStart row but no lookupEnd row. That state can't arise from the cumulative-summary loader: any key present on a given date is carried forward to every later date. More fundamentally, prefix sums are monotonic by definition, so a key present at start but absent at end is a data-consistency violation, not an input the read path should paper over. Handling it in the query would just mask a loader/data bug.</p>
+  </div>
+  <div class="verified">
+    <span class="badge verified-ok">Verified 2026-08-19T16:35:12Z</span>
+    <p>Read both write paths end-to-end. The author is correct.</p>
+    <p><strong>1. <code>pkg/db/cumulativesummary/cumulative_summary.go</code></strong> (batch Backfill path): <code>insertSQL</code> (lines 77-99) rebuilds each day from a <code>FULL OUTER JOIN</code> of yesterday's row (<code>prev</code>) and today's daily totals (<code>tds</code>) on the full key. When a key exists in <code>prev</code> with no matching <code>tds</code> row today (the reclassification case), the join still emits a row via <code>COALESCE(prev.*, tds.*)</code> &mdash; carrying every prev field forward unchanged. The old key is never dropped; it persists flat forever. The comment above <code>deleteSQL</code> ("rows whose daily-total key changed ... are dropped instead of persisting forever") does not match what the SQL does.</p>
+    <p><strong>2. <code>pkg/dataloader/prowloader/pgwriter/pgwriter.go</code></strong> (incremental path that drives production ingestion): <code>ensureCumulativeSummaryRows</code> (line 527) creates a zero-baseline row for any key seen in the batch on-or-before the day being processed; <code>updateCumulativeSummaries</code> (line 550) adds that batch's deltas. Both run once per day for every day from the batch's earliest date through "tomorrow", so an inactive key still gets ensured+updated (flat) every subsequent day. <code>CarryForwardCumulativeSummaries</code>/<code>carryForwardRelease</code> (lines 586-624) separately copies the previous day's full row set verbatim into any full gap day, for every existing key.</p>
+    <p>Net effect: once a key has a row on any date, it has a row (flat if inactive) on every later date, under both write paths. The row shape this finding assumed is not reachable from either write path during normal operation.</p>
+    <p><em>Residual caveat, not blocking:</em> a full historical re-run of <code>Backfill</code> after retroactively relabeling <code>test_daily_totals</code> lifecycle values across history (a data-correction operation, not routine ingestion) could in principle produce a gap if processed sequentially from the relabel point &mdash; worth a comment in the loader if ever exercised, not a reason to hold this PR.</p>
+    <p><strong>Resolution:</strong> downgraded from blocking to a documentation note; no SQL change made or required. Worth fixing the misleading <code>deleteSQL</code> comment at <code>cumulative_summary.go:74</code> separately (unrelated to this PR).</p>
+  </div>
+</div>
+
+<div class="finding should-fix resolved">
+  <span class="badge resolved">Resolved</span>
+  <strong>prow_jobs join template duplicated verbatim between two functions</strong>
+  <div class="loc"><code>cr_queries.go:246-250</code> (inline in <code>queryTestStatusCTE</code>) vs <code>cr_queries.go:446-451</code> (<code>prowJobJoinTemplate</code> in <code>queryCombinedTestStatus</code>) &mdash; original locations, before the fix</div>
+  <pre>JOIN prow_jobs pj ON pj.id = e.prow_job_id
+                AND pj.deleted_at IS NULL
+                AND pj.variant_combination_id IN (%s)
+            JOIN vg ON vg.vcid = pj.variant_combination_id</pre>
+  <p>Identical join predicate existed in two places with no shared constant/helper. Raised inline by petr-muller 2026-08-19T10:51:47Z ("template is identical to L246 - would it make sense to extract?").</p>
+  <p><strong>Resolved at <code>a895b2666</code>:</strong> extracted into <code>prowJobVariantJoin</code> (<code>variants.go</code>), used by both <code>queryTestStatusCTE</code> and <code>queryCombinedTestStatus</code>. Author replied "Done." 2026-08-19T14:27:25Z.</p>
+</div>
+
+<div class="finding should-fix resolved">
+  <span class="badge resolved">Resolved</span>
   <strong>queryCombinedTestStatus hand-rolls variant lookup/filter construction instead of reusing prepareVariantQuery</strong>
-  <div class="loc"><code>cr_queries.go:416-451</code></div>
+  <div class="loc"><code>cr_queries.go:416-451</code> &mdash; original location, before the fix</div>
   <pre>sampleLookup, err := lookupVariantValues(ctx, p.dbc, sampleIncludeVariants, dbGroupBy)
 ...
 sampleFilterClause, sampleFilterArgs := buildVariantFilterClause(sampleIncludeVariants)
 sampleVarSubquery := "SELECT vc.id FROM variant_combinations vc"
 if sampleFilterClause != "" { sampleVarSubquery += " WHERE " + sampleFilterClause }</pre>
-  <p><code>prepareVariantQuery</code> already encapsulates this exact bundle for the standalone path. A bug fix to <code>buildVariantFilterClause</code> semantics or similar is easy to apply there and forget to mirror in this inlined equivalent.</p>
+  <p><code>prepareVariantQuery</code> already encapsulated this exact bundle for the standalone path. Raised inline by petr-muller 2026-08-19T11:44:37Z (via LLM-assisted review, with a linked proposed-fix commit).</p>
+  <p><strong>Resolved at <code>a895b2666</code>:</strong> both <code>prepareVariantQuery</code> and <code>queryCombinedTestStatus</code> now call the shared <code>resolveVariantFilter</code> (<code>variants.go</code>). Author replied "Done." 2026-08-19T14:27:36Z.</p>
+</div>
+
+<div class="finding nit resolved">
+  <span class="badge resolved">Resolved</span>
+  <strong>buildVariantFilterClause called twice with identical args inside resolveVariantFilter</strong>
+  <div class="loc"><code>variants.go</code> &mdash; <code>lookupVariantValues</code> internally called <code>buildVariantFilterClause</code>; <code>resolveVariantFilter</code> called it again with the same <code>includeVariants</code></div>
+  <p>Source: CodeRabbit, PR review 2026-08-19T14:33:02Z, nitpick.</p>
+  <p><strong>Resolved at <code>2d9f0e2ff</code>:</strong> <code>lookupVariantValues</code> now takes <code>filterClause</code>/<code>filterArgs</code> as parameters instead of computing them itself; <code>resolveVariantFilter</code> computes them once and passes them down.</p>
+</div>
+
+<div class="finding nit resolved">
+  <span class="badge resolved">Not applicable (explained)</span>
+  <strong>Planner hints (enable_nestloop/enable_sort off) applied globally, not scoped to the combined query</strong>
+  <div class="loc"><code>cr_queries.go:34</code> (<code>queryPlannerHints</code>), applied at both standalone and combined query paths</div>
+  <p>Source: CodeRabbit, PR review 2026-08-19T14:33:02Z (flagged Major/actionable): "A combined-query benchmark does not establish acceptable plans for the standalone paths."</p>
+  <div class="dispute">
+    <span class="badge disputed">Author response</span>
+    <p><strong>mstaeble, 2026-08-19T17:31:00Z:</strong> The hints predate this PR &mdash; they originate from the TRT-2741 PostgreSQL CR provider work, which benchmarked the standalone prefix-sum and GA queries with these exact hints. The combined query deliberately reuses the same shared constant so the two paths stay consistent rather than drift.</p>
+  </div>
+  <p><strong>CodeRabbit, 2026-08-19T17:31:42Z:</strong> accepted the clarification &mdash; "The finding does not apply" &mdash; and recorded it as a durable learning for future reviews of this file.</p>
+</div>
+
+<div class="finding nit resolved">
+  <span class="badge resolved">Resolved</span>
+  <strong>Combined-query Info-level logs on every request</strong>
+  <div class="loc"><code>cr_queries.go</code> (<code>queryCombinedTestStatus</code> scan-complete log, <code>mergePlaceholders</code> per-side merge logs)</div>
+  <p>Source: CodeRabbit, PR review 2026-08-19T14:33:02Z: "Every report request then emits three Info lines that report internal query metrics."</p>
+  <p><strong>Resolved at <code>2d9f0e2ff</code>:</strong> both logs changed from <code>log.Info</code> to <code>log.Debug</code>.</p>
+</div>
+
+<div class="finding nit resolved">
+  <span class="badge resolved">Resolved</span>
+  <strong>Untyped <code>?</code> bind parameter for UNION branch source tag</strong>
+  <div class="loc"><code>cr_queries.go:432-444</code></div>
+  <p>Source: CodeRabbit, PR review comment 2026-08-19T14:33:00Z: an untyped <code>? AS source</code> parameter in a <code>UNION ALL</code> select list can produce Postgres error 42P18 ("could not determine data type of parameter") depending on how the planner resolves types across branches.</p>
+  <p><strong>Resolved at <code>2d9f0e2ff</code>:</strong> replaced with typed literals <code>'S'::text AS source</code> / <code>'B'::text AS source</code> baked directly into each branch's template invocation, removing the bind parameter (and 4 of the corresponding <code>allArgs</code> entries) entirely.</p>
 </div>
 
 <h2>Things I checked and was fine with</h2>
 <ul class="tight">
-  <li>BigQuery provider parity: this PR only touches the Postgres provider; no BigQuery-side aggregation logic changed. (Worth separately checking whether BigQuery's equivalent aggregation has the same start/end-pairing assumption as the blocking finding above.)</li>
-  <li>No obvious formatting issues in the modified file.</li>
+  <li>BigQuery provider parity: this PR only touches the Postgres provider; no BigQuery-side aggregation logic changed.</li>
+  <li>No obvious formatting issues in the modified files.</li>
   <li>The shared <code>failureBranchTemplate</code>/<code>placeholderBranchTemplate</code> UNION branch templates are unchanged and correctly shared, not duplicated.</li>
+  <li>CI (openshift-ci bot): all required tests passed as of 2026-08-20T02:50:50Z.</li>
+  <li>CodeRabbit automated review: APPROVED at 2026-08-19T17:37:05Z, after all its findings were resolved or explained.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
 <ul class="tight">
-  <li>Is dropping <code>prow_job_id</code>/<code>lifecycle</code> from the <code>GROUP BY</code> (cr_queries.go:150) intentional &mdash; is there a reason lifecycle reclassification can't happen within a lookup window in practice &mdash; or is this a regression from collapsing the self-join into CASE-WHEN aggregation?</li>
-  <li>Was this rewrite validated against the old self-join query's output on a dataset that includes a lifecycle transition or variant-combination change within the base/sample window?</li>
-  <li>Given the duplication between the two prow_jobs join templates, would it make sense to extract a single shared helper while both call sites are fresh?</li>
+  <li>Was this rewrite validated against the old self-join query's output on a dataset that includes a lifecycle transition or variant-combination change within the base/sample window? Still open &mdash; the write-path verification confirms the assumed carry-forward invariant holds, not that the rewrite was tested end-to-end against a dataset exercising it. Low priority given the invariant is now understood and documented here.</li>
+</ul>
+
+<h2>Timeline since original review (2026-08-08T13:24:11Z, <code class="mono">5fdcc5e07</code>)</h2>
+<ul class="tight">
+  <li>2026-08-19: petr-muller posted an LLM-assisted review (COMMENTED, "fine to merge if you don't find them serious") with the blocking GROUP BY finding and two duplication nitpicks.</li>
+  <li>2026-08-19: mstaeble disputed the blocking finding's premise; extracted both duplicated bundles into shared helpers (<code>prowJobVariantJoin</code>, <code>resolveVariantFilter</code>) and marked the duplication comments "Done".</li>
+  <li>2026-08-19T14:33: CodeRabbit posted a CHANGES_REQUESTED automated review &mdash; one actionable (planner-hint scope) and two nitpicks (log levels, duplicate <code>buildVariantFilterClause</code> call) &mdash; plus, in the same pass, a further nitpick about the untyped source bind parameter.</li>
+  <li>2026-08-19T16:35: Reviewer independently verified the blocking finding against <code>cumulative_summary.go</code> and <code>pgwriter.go</code>; confirmed the author's rebuttal and downgraded the finding.</li>
+  <li>2026-08-19T17:31: mstaeble addressed all CodeRabbit findings &mdash; either fixing them (log levels, duplicate filter-clause call, typed source literal) or explaining why the planner-hint finding didn't apply (pre-existing TRT-2741 benchmark coverage).</li>
+  <li>2026-08-19T17:37: CodeRabbit accepted the planner-hint explanation and APPROVED.</li>
+  <li>2026-08-20T02:50: CI reported all required tests passed.</li>
+  <li>PR remains OPEN, unmerged, no further unresolved feedback as of this refresh.</li>
 </ul>
 
 </body>
