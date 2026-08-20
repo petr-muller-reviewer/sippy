@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3716</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #1a1a1a;
+    background: #fff;
+    max-width: 900px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: #f4f4f6;
+    border-radius: 4px;
+  }
+  code { padding: 0.1em 0.35em; font-size: 0.92em; }
+  pre {
+    padding: 0.85em 1em;
+    overflow-x: auto;
+    font-size: 0.85em;
+    border: 1px solid #e2e2e6;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  h2 {
+    font-size: 1.25rem;
+    margin-top: 2.2rem;
+    border-bottom: 2px solid #e2e2e6;
+    padding-bottom: 0.3rem;
+  }
+  h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+  .meta {
+    background: #f8f8fa;
+    border: 1px solid #e2e2e6;
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-size: 0.92rem;
+  }
+  .meta div { margin: 0.15rem 0; }
+  .meta a { color: #0969da; }
+  .verdict-box {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-size: 1rem;
+    border-left: 5px solid;
+  }
+  .verdict-request-changes { background: #fff5f5; border-color: #cf222e; }
+  .verdict-approve { background: #f0fdf4; border-color: #1a7f37; }
+  .verdict-needs-discussion { background: #fffbea; border-color: #9a6700; }
+  .verdict-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.85rem; }
+  .finding {
+    border: 1px solid #e2e2e6;
+    border-left-width: 5px;
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 1rem;
+  }
+  .finding.blocking { border-left-color: #cf222e; }
+  .finding.should-fix { border-left-color: #bf8700; }
+  .finding.nit { border-left-color: #6e7781; }
+  .finding.question { border-left-color: #0969da; }
+  .sev-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.1em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .sev-tag.blocking { background: #cf222e; }
+  .sev-tag.should-fix { background: #bf8700; }
+  .sev-tag.nit { background: #6e7781; }
+  .sev-tag.question { background: #0969da; }
+  .loc { color: #57606a; font-size: 0.88rem; margin: 0.2rem 0 0.5rem; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.35rem; }
+  .hl { background: #fff8c5; padding: 0 0.15em; }
+  .since {
+    background: #eef4ff;
+    border: 1px solid #cfe0ff;
+    border-radius: 6px;
+    padding: 0.8rem 1.1rem;
+    font-size: 0.92rem;
+    margin: 1rem 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3716</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3716">openshift/sippy#3716</a></div>
+  <div><strong>Title:</strong> [WIP] TRT-2364: Fix timestamp and date type inconsistencies</div>
+  <div><strong>Head SHA:</strong> <code>9ba64f3e40433fcbfea191c6e1c38c5454f8288e</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-19T11:24:41Z</div>
+</div>
+
+<h2>Verdict</h2>
+<div class="verdict-box verdict-request-changes">
+  <div class="verdict-label">Request changes</div>
+  <p>One likely-unintentional behavior change (a silently dropped <code>OVERLAPS</code> where-clause that changes which JIRA incidents the calendar returns) should be confirmed with the author before merge. A second regression &mdash; dropped timestamp filter validation in <code>splitJobAndJobRunFilters</code> &mdash; degrades error handling from a clean 400 to a raw downstream error. Everything else is should-fix/nit territory (provider-parity gaps, an unmigrated Filterable implementation, duplicated field lists) that doesn't need to block merge but should be tracked.</p>
+</div>
+
+<div class="since">
+  <strong>Since last review:</strong> the branch was rebased onto a much newer <code>main</code> (old head <code>8906ae372</code> is not an ancestor of new head <code>c192dbd6f</code>), which also pulled in the sippy-ng CRA&rarr;Vite migration (<code>.js</code> &rarr; <code>.jsx</code> renames). This warranted a full re-review rather than an incremental refresh. Two new issues surfaced: the dropped <code>OVERLAPS</code> clause in <code>jira.go</code>, and dropped timestamp validation in <code>splitJobAndJobRunFilters</code>.
+</div>
+
+<div class="since">
+  <strong>Since previous review:</strong> the branch was rebased again (<code>c192dbd6f</code> &rarr; <code>9ba64f3e4</code>, old head again not an ancestor of new). Verified the PR's own diff is content-identical across the rebase except one now-redundant import line in <code>pkg/api/tests.go</code>; no findings changed as a result. Author requested a CodeRabbit review; CI e2e passed; no new human review activity.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Replaces epoch millisecond integers with proper <code>time.Time</code>, <code>civil.Date</code>, and RFC 3339 / <code>YYYY-MM-DD</code> serialization across the Go backend, PostgreSQL schema, and React frontend.</li>
+  <li>Adds <code>StripJobRunFilters</code> to fix a pre-existing bug where timestamp filters caused errors on <code>/api/jobs</code>.</li>
+  <li>Sets <code>timezone=UTC</code> on all PostgreSQL connections.</li>
+  <li>Rewrites <code>JobsDetail</code> day bucketing to use <code>Temporal.PlainDate</code>.</li>
+  <li>Updates project coding standards (CLAUDE.md, APM instructions) with timestamp/date guidelines.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Blocking</h3>
+
+<div class="finding blocking">
+  <span class="sev-tag blocking">blocking</span><strong>JIRA incident query silently drops a WHERE clause, changing which incidents match</strong>
+  <div class="loc"><code>pkg/api/jira.go:26</code></div>
+  <p>The prior code had two AND-ed <code>.Where(...)</code> clauses: a COALESCE'd <code>OVERLAPS</code> (used for the <code>end</code> column display value) and a second, un-COALESCE'd <code>(start_time, resolution_time) OVERLAPS (?, ?)</code> that actually filtered rows. For open/unresolved incidents (<code>resolution_time IS NULL</code>), that second clause evaluated to SQL NULL, which excludes the row under <code>AND</code> semantics &mdash; so open incidents were never returned. This PR's timestamp-type migration collapsed the query to a single <code>.Where</code> using the COALESCE'd clause, so open incidents now match whenever active in the queried range. This looks like an accidental behavior change riding along with a type-only refactor: the commit describes type fixes, not incident-filtering semantics, and there's no test on <code>GetJIRAIncidentsFromDB</code>/<code>CalendarEvent</code>.</p>
+  <pre>// before (main):
+.Where(`(start_time, COALESCE(resolution_time, '`+startOfNextDay+`')) OVERLAPS (?, ?)`, start, end).
+.Where(`(start_time, resolution_time) OVERLAPS (?, ?)`, start, end).
+// after (this PR):
+.Where(`(start_time, COALESCE(resolution_time, ?)) OVERLAPS (?, ?)`, startOfNextDay, start, end).</pre>
+</div>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <span class="sev-tag should-fix">should-fix</span><strong>splitJobAndJobRunFilters dropped timestamp validation and its error return</strong>
+  <div class="loc"><code>pkg/sippyserver/parameters.go:115-131</code></div>
+  <p>The previous epoch-ms implementation parsed and validated the <code>timestamp</code> filter value here, returning an error the caller turned into an HTTP 400. The new version just routes <code>timestamp</code>/<code>cluster</code> filter items to <code>jobRunsFilter</code> with no parsing, and the function no longer returns an error (both call sites in <code>server.go</code> now have nothing to check). A malformed timestamp value is no longer rejected up front &mdash; it now fails later and less cleanly, inside <code>pkg/filter</code> (unhandled DB type-cast error on Postgres, or a sentinel string that fails query execution on BigQuery via <code>makeTimestampParam</code>).</p>
+  <pre>func splitJobAndJobRunFilters(fil *filter.Filter) (*filter.Filter, *filter.Filter) {
+	...
+	for _, f := range fil.Items {
+		switch f.Field {
+		case "timestamp":
+			jobRunsFilter.Items = append(jobRunsFilter.Items, f)
+		case "cluster":
+			jobRunsFilter.Items = append(jobRunsFilter.Items, f)
+		default:
+			jobFilter.Items = append(jobFilter.Items, f)
+		}
+	}
+	return jobFilter, jobRunsFilter
+}</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="sev-tag should-fix">should-fix</span><strong>Postgres timestamp filter path has no validation/logging counterpart to the new BigQuery path</strong>
+  <div class="loc"><code>pkg/filter/filterable.go:163-183</code> (<code>FilterFieldToSQL</code>/<code>FilterItemToSQL</code>) vs <code>:212-219</code> (<code>makeTimestampParam</code>)</div>
+  <p>The new BigQuery arithmetic-filter path parses and validates timestamp values via <code>makeTimestampParam</code>, logging a structured error (field + value) before substituting a sentinel on failure. The Postgres arithmetic path (<code>FilterItemToSQL</code>) has no equivalent &mdash; a malformed timestamp value goes straight through as a raw bind parameter with no field/value context logged when it eventually fails as a DB type-cast error. Project convention (CLAUDE.md) calls for parity between the two providers; this is a narrow but real gap in error observability.</p>
+  <pre>makeTimestampParam := func() []bigquery.QueryParameter {
+	t, err := time.Parse(time.RFC3339Nano, f.Value)
+	if err != nil {
+		log.Errorf("Failed to parse timestamp filter value %q for field %s: %v", f.Value, f.Field, err)
+		return makeParam("NOT A TIMESTAMP: " + f.Value)
+	}
+	return makeParam(t)
+}</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="sev-tag should-fix">should-fix</span><strong>RecentTestFailure.Filterable not migrated to the new timestamp type system</strong>
+  <div class="loc"><code>pkg/apis/api/recent_test_failures.go:31-45</code></div>
+  <p>Every other <code>Filterable</code> implementation touched by this PR was migrated so <code>GetFieldType</code> returns <code>ColumnTypeTimestamp</code> for time fields and <code>GetTimestampValue</code> is implemented. <code>RecentTestFailure</code> was missed: <code>GetFieldType</code> still falls through to <code>ColumnTypeNumerical</code> for <code>first_failure</code>/<code>last_failure</code>/<code>last_pass</code>. Currently dormant &mdash; <code>GetRecentTestFailures</code> filters via direct SQL, not the in-memory <code>filter.Filter()</code> path &mdash; but it's an inconsistency with the rest of the migration and will silently no-op an RFC3339 filter/sort value if the in-memory path is ever exercised against this type.</p>
+  <pre>func (r RecentTestFailure) GetFieldType(param string) ColumnType {
+	switch param {
+	case "test_name", "suite_name", "jira_component":
+		return ColumnTypeString
+	default:
+		return ColumnTypeNumerical
+	}
+}</pre>
+</div>
+
+<div class="finding should-fix">
+  <span class="sev-tag should-fix">should-fix</span><strong>jobRunFields / splitJobAndJobRunFilters still duplicates field ownership across packages</strong>
+  <div class="loc"><code>pkg/filter/filterable.go:59</code> and <code>pkg/sippyserver/parameters.go:115-131</code></div>
+  <p><em>Unresolved from the prior review round.</em> Two independent hardcoded lists of job-run-only fields (<code>timestamp</code>, <code>cluster</code>) live in different packages with no shared constant; the two <code>switch</code> case bodies in <code>splitJobAndJobRunFilters</code> are now byte-identical, which could at least collapse to <code>case "timestamp", "cluster":</code>. Adding a new job-run-only field requires remembering to update both packages, or it silently misroutes to the wrong query.</p>
+  <pre>var jobRunFields = sets.NewString("timestamp", "cluster")</pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <span class="sev-tag nit">nit</span><strong>RFC3339 timestamp parsing duplicated with divergent error handling</strong>
+  <div class="loc"><code>pkg/filter/filterable.go:212</code> (BigQuery) and <code>:652</code> (in-memory/Postgres-model)</div>
+  <p><code>time.Parse(time.RFC3339Nano, ...)</code> is implemented independently in both places, one logging and substituting a sentinel on failure, the other returning a bare error. A future format change has to land in both spots or the exact BigQuery/Postgres divergence this PR fixes elsewhere comes back.</p>
+  <pre>comparison, err := time.Parse(time.RFC3339Nano, filter.Value)
+if err != nil {
+	return false, fmt.Errorf("failed to parse timestamp filter value %q: %w", filter.Value, err)
+}</pre>
+</div>
+
+<div class="finding nit">
+  <span class="sev-tag nit">nit</span><strong>JobsDetail.jsx still uses the global Temporal API with no runtime polyfill</strong>
+  <div class="loc"><code>sippy-ng/src/jobs/JobsDetail.jsx:57-58,106,116</code></div>
+  <p>Re-verified this round: <code>JobsDetail.jsx</code> is unreferenced anywhere else in <code>sippy-ng/src</code> (confirmed via grep), consistent with the prior review's conclusion that this page is unreachable dead code. <code>Temporal</code> is still used with only an ESLint <code>/* global Temporal */</code> suppression and no <code>@js-temporal/polyfill</code> dependency, so it would crash on load in any current browser if the page ever became reachable again. Downgraded from the prior round's "resolved" status to a nit since the code still ships in the bundle even if unreachable.</p>
+  <pre>/* global Temporal */
+const day = Temporal.PlainDate.from(result.start)</pre>
+</div>
+
+<div class="finding nit">
+  <span class="sev-tag nit">nit</span><strong>JobsDetail day-bucketing indices kept in sync only by convention</strong>
+  <div class="loc"><code>sippy-ng/src/jobs/JobsDetail.jsx:106</code></div>
+  <p>The column-header loop walks backward from <code>endDate</code> to build day labels, while each result's bucket index is computed forward via <code>resultDate.until(endDate).days</code>. They currently agree only because both are anchored to <code>endDate</code>; nothing derives them from a single shared sequence. A future reordering of one without the other would silently misplace results under the wrong date column with no compiler or test signal.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>SQL filter generation (<code>orFilterToSQL</code>, <code>andFilterToSQL</code>) correctly removes epoch extraction and passes <code>timestamptz</code> directly.</li>
+  <li><code>civil.Date.Scan</code> handles <code>time.Time</code> from PostgreSQL correctly for <code>CountByDate.Date</code>.</li>
+  <li>Frontend timestamp filter values correctly changed from epoch ms to ISO 8601 strings throughout.</li>
+  <li><code>StripJobRunFilters</code> is a correctness improvement (old code would have errored or silently ignored timestamp filters on <code>/api/jobs</code>).</li>
+  <li>DataGrid <code>valueGetter</code> correctly returns Date objects for sorting/filtering.</li>
+  <li><code>App.jsx</code> timezone-Z stripping hack correctly removed (<code>civil.Date</code> serializes as <code>YYYY-MM-DD</code>).</li>
+  <li><code>releasedates.go</code> <code>gaTime := release.GADate.In(time.UTC)</code> is correct (<code>civil.Date.In</code> returns midnight in the given timezone).</li>
+  <li><code>splitJobAndJobRunFilters</code> signature change (dropping the error return) is internally consistent with its callers, even though it removes validation (see should-fix finding above).</li>
+  <li><code>JobsDetail.jsx</code> confirmed unreferenced from any route/import in <code>sippy-ng/src</code> (dead code, matches prior review round's conclusion).</li>
+  <li><code>toBQStr</code> path is not affected (only used with Test objects, no <code>ColumnTypeTimestamp</code> fields).</li>
+  <li><code>test_analysis.go</code> fix: <code>time.Now()</code> replaced with <code>reportEnd</code>, added upper bound (<code>date &lt;= reportEnd</code>).</li>
+  <li><code>useStableJSONQueryParam</code> hook correctly stabilizes object references via JSON serialization comparison.</li>
+  <li><code>GridToolbarFilterItem.jsx</code> preserves the <code>not</code> field when updating filter model.</li>
+  <li><code>App.jsx</code> <code>useEffect</code> dependency array fix (<code>[isLoaded]</code>) is correct.</li>
+  <li><code>type:'date'</code> added to Regressed Since and Last Failure DataGrid columns.</li>
+  <li>File renames from <code>.js</code> to <code>.jsx</code> (JobsDetail, GridToolbarFilterItem, App, JobTable, PullRequestsTable, etc.) are extension-only, no behavioral changes riding along with the rename itself.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Was dropping the second <code>OVERLAPS</code> where-clause in <code>GetJIRAIncidentsFromDB</code> (<code>jira.go:26</code>) intentional? If so, was it validated against the calendar UI showing open incidents correctly? If not, the clause needs to be restored.</li>
+  <li>Was removing timestamp filter validation from <code>splitJobAndJobRunFilters</code> (and its error return) intentional, or a side effect of dropping the old epoch-ms parsing code? Should equivalent RFC3339 validation be added back so bad input still gets a clean 400?</li>
+  <li>Would it make sense to consolidate the job-run field set (<code>timestamp</code>, <code>cluster</code>) into a single exported constant shared between <code>pkg/filter</code> and <code>pkg/sippyserver</code>?</li>
+  <li>Is <code>RecentTestFailure</code>'s <code>Filterable</code> implementation intentionally left on the old numerical/epoch model, or was it missed during the migration?</li>
+</ul>
+
+</body>
+</html>
