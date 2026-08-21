@@ -21,62 +21,136 @@
   pre { padding: 0.75rem 1rem; overflow-x: auto; }
   h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
   h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
+  h3 { font-size: 1rem; margin-top: 1.5rem; }
   .meta { color: #555; font-size: 0.9rem; margin-bottom: 1.5rem; }
   .meta div { margin: 0.15rem 0; }
   .verdict {
-    background: #e8f5e9;
-    border-left: 4px solid #43a047;
+    background: #fff3e0;
+    border-left: 4px solid #fb8c00;
     padding: 0.75rem 1rem;
     margin: 1rem 0;
   }
-  .verdict .label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #2e7d32; }
+  .verdict .label { font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: #e65100; }
   ul { padding-left: 1.4rem; }
   li { margin: 0.35rem 0; }
   a { color: #1565c0; }
   .none { color: #666; font-style: italic; }
+  .finding {
+    border: 1px solid #e0e0e0;
+    border-left-width: 4px;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+  }
+  .finding.should-fix { border-left-color: #fb8c00; }
+  .finding.nit { border-left-color: #90a4ae; }
+  .finding h4 { margin: 0 0 0.35rem 0; font-size: 1rem; }
+  .sev {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 0.1em 0.5em;
+    border-radius: 3px;
+    margin-right: 0.5em;
+    color: #fff;
+  }
+  .sev.should-fix { background: #fb8c00; }
+  .sev.nit { background: #90a4ae; }
+  .where { font-size: 0.85rem; color: #555; margin-bottom: 0.4rem; }
 </style>
 </head>
 <body>
 
 <h1>Review: openshift/sippy#3914</h1>
 <div class="meta">
-  <div><strong>Title:</strong> Expand seed data coverage for release payloads, bugs, symptoms, test outputs, and CR views</div>
+  <div><strong>Title:</strong> TRT-2824: Improve Sippy's DB Seeding</div>
   <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3914">openshift/sippy#3914</a></div>
-  <div><strong>Head SHA:</strong> <code>f3b0903d28e71f9e985b85d46b0fedad4984ff05</code></div>
+  <div><strong>Head SHA:</strong> <code>5e0b5af51b1c3f9b3d58b52ad02f9abce3f77715</code> (PR merged)</div>
   <div><strong>Base:</strong> main</div>
-  <div><strong>Reviewed at:</strong> 2026-08-19T13:33:06Z</div>
+  <div><strong>Reviewed at:</strong> 2026-08-21T10:22:26Z</div>
 </div>
 
 <div class="verdict">
-  <div class="label">Verdict: Approve</div>
-  <p>The change is a self-contained, additive expansion of local dev/e2e seed data with no production code paths touched. All new seeding logic was hand-traced against the actual model definitions and existing query code, and a prior CodeRabbit review round already resolved the substantive issues (previous-tag linkage, non-deterministic queries, map-based races, multi-view regression closing). No new correctness, convention, or cleanup issues were found.</p>
+  <div class="label">Verdict: Request changes</div>
+  <p>The seed-data expansion itself is solid and absorbed three rounds of review feedback. The riskiest item &mdash; the Postgres <code>queryTestDetails</code> lateral join with a BigQuery/Postgres parity gap &mdash; was reverted entirely in response to reviewer feedback that it was too invasive for this PR (see Resolved). One should-fix remains open (<code>syncRegressions</code> close-loop error handling) plus minor cleanup items; the PR merged before these were addressed.</p>
 </div>
 
 <h2>What this PR does</h2>
 <ul>
-  <li>Adds <code>seedReleasePayloads()</code> to <code>cmd/sippy/seed_data.go</code>: 6 <code>release_tags</code> across 4.21/4.22 nightly/ci streams, with <code>release_job_runs</code>, <code>release_pull_requests</code>, <code>release_repositories</code>, and correct previous-accepted-tag linkage per release/stream.</li>
-  <li>Adds <code>seedBugsAndTriages()</code>: 4 <code>bugs</code> with Jira-style URLs/statuses linked to seeded tests/jobs, plus 2 <code>triage</code> records linked to regressions.</li>
-  <li>Adds <code>seedSymptomJobRunLinkage()</code>: applies label definitions to failed job runs, populates <code>job_symptoms</code>, and creates <code>triage_symptoms</code>.</li>
-  <li>Adds <code>seedTestOutputsForPeriodicJobs()</code>: seeds <code>prow_job_run_test_outputs</code> for 4 failed periodic-job test cases.</li>
-  <li>Adds 2 new component-readiness views (<code>4.21-cross-compare</code>, <code>4.22-flake-as-failure</code>) to <code>config/seed-views.yaml</code>.</li>
-  <li>Adds e2e tests (<code>test/e2e/release_payloads_test.go</code>, <code>test/e2e/test_outputs_test.go</code>) exercising the new data through existing API endpoints.</li>
+  <li>Expands <code>cmd/sippy/seed_data.go</code> to seed release payloads (<code>release_tags</code>, <code>release_job_runs</code>, <code>release_pull_requests</code>, <code>release_repositories</code>), bugs/Jira linkage, symptom-to-job-run linkage, and periodic-job test output text.</li>
+  <li>Adds 2 new component-readiness views to <code>config/seed-views.yaml</code>, including a <code>4.22-amd64-vs-arm64</code> cross-compare view (replacing an earlier, disputed <code>4.22-flake-as-failure</code> view).</li>
+  <li>Refactors <code>syncRegressions</code> to aggregate active regression IDs per release across all enabled views before closing stale ones.</li>
+  <li>Adds a production change to <code>pkg/api/componentreadiness/dataprovider/postgres/provider.go</code>: a <code>LEFT JOIN LATERAL</code> in <code>queryTestDetails</code> populating <code>JobLabels</code>/<code>JobSymptoms</code> per test-details row.</li>
+  <li>Adds e2e tests exercising the new seed data through existing API endpoints.</li>
+  <li>Went through 3 rounds of CodeRabbit review and a staging walkthrough from <code>smg247</code>; several issues were already fixed along the way.</li>
+  <li>Since previous review: reverted the <code>queryTestDetails</code> lateral join and <code>JobLabels</code>/<code>JobSymptoms</code> provider change entirely (reviewer feedback: "too invasive for this PR"). Added a <code>4.22-gcp-only</code> seed view (Platform:gcp subset of <code>4.22-main</code>) so two views' regressions share the same <code>TestRegression</code> record, exercising multi-view regression sharing. Skips cache writes for views with <code>prime_cache.enabled: false</code>. PR merged at <code>5e0b5af51</code>.</li>
 </ul>
 
 <h2>Findings</h2>
-<p class="none">No blocking, should-fix, or nit findings. This branch already carries a fixup commit (<code>f3b0903d2</code>) that addressed prior CodeRabbit feedback: previous-tag-linkage bug, non-deterministic <code>Limit()</code> queries, map-based label/symptom assignment races, and a multi-view regression-closing bug.</p>
+
+<h3>Should fix</h3>
+
+<div class="finding should-fix">
+  <h4><span class="sev should-fix">should-fix</span>syncRegressions abandons the close-loop for all releases if any later view's report generation fails</h4>
+  <div class="where"><code>cmd/sippy/seed_data.go:989-1033</code></div>
+  <p>The close-loop runs once, after the per-view loop, using accumulated <code>releaseActiveIDs</code>. A <code>GetComponentReport</code> error triggers an immediate <code>return</code> before the close-loop is reached &mdash; so a later view's failure prevents closing stale regressions for releases whose views already succeeded earlier in the same run. Production's <code>regressioncacheloader.go</code> isolates errors per release; this doesn't.</p>
+  <pre>report, reportErrs := componentreadiness.GetComponentReport(ctx, provider, dbc, reportOpts, "")
+if len(reportErrs) &gt; 0 {
+    for _, e := range reportErrs {
+        rLog.WithError(e).Warn("report generation error")
+    }
+    return fmt.Errorf("error generating component report for view %s", view.Name)
+}</pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <h4><span class="sev nit">nit</span>New seeding helpers use plain Create() instead of the file's idempotent FirstOrCreate pattern</h4>
+  <div class="where"><code>cmd/sippy/seed_data.go:1480</code> (and similar in <code>seedReleasePayloads</code>/<code>seedBugsAndTriages</code>)</div>
+  <p><code>dbc.DB.Create(&amp;tag)</code> duplicates <code>ReleaseTag</code>/<code>ReleaseRepository</code>/<code>ReleaseJobRun</code>/<code>Bug</code> rows if seed is re-run against an already-seeded database, unlike the rest of this file which uses <code>FirstOrCreate</code> on a natural key.</p>
+</div>
+
+<div class="finding nit">
+  <h4><span class="sev nit">nit</span>syncRegressions reimplements RegressionCacheLoader's close-rolled-off logic instead of reusing it</h4>
+  <div class="where"><code>cmd/sippy/seed_data.go:961-1033</code> vs <code>pkg/dataloader/regressioncacheloader/regressioncacheloader.go</code></div>
+  <p>Duplicating the "diff active IDs, close the rest" logic risks drift as the production implementation evolves.</p>
+</div>
+
+<div class="finding nit">
+  <h4><span class="sev nit">nit</span>Per-regression / per-job-run DB round trips instead of batching</h4>
+  <div class="where"><code>cmd/sippy/seed_data.go:1582-1624</code></div>
+  <p>One raw SQL query per regression plus one <code>Create()</code> per failed run inside a loop. Not a hot path, but run time scales linearly as more synthetic regressions are added, which has already happened repeatedly in this PR.</p>
+</div>
 
 <h2>Things I checked and was fine with</h2>
 <ul>
-  <li><code>sort.SliceStable</code> + <code>lastAccepted</code> map builds a correct per-release/stream previous-accepted chain &mdash; hand-traced all 6 synthetic payloads.</li>
-  <li>Refactored <code>syncRegressions</code> aggregates active regression IDs per release across all enabled views before closing any, matching the production pattern in <code>pkg/dataloader/regressioncacheloader/regressioncacheloader.go</code>; fixes the prior bug where a second view could re-close a first view's still-active regression.</li>
-  <li><code>sets.Set[uint]</code> used instead of a hand-rolled <code>map[X]bool</code>, per repo convention.</li>
-  <li>Foreign-key wiring in <code>seedReleasePayloads</code> (<code>ReleaseTagID</code> as string, composite FKs for <code>ProwJobRunTestOutput</code>) matches the model/gorm tags exactly.</li>
-  <li><code>gofmt -l</code> is clean on the modified file.</li>
-  <li>New e2e tests hit endpoints/queries that already exist and correctly filter by the seeded <code>release</code> values.</li>
+  <li>Previously-flagged CodeRabbit issues are fixed as claimed: deterministic ordering before <code>Limit(4)</code> (9fcb28f), triage-symptom consistency (9fcb28f), triage lookup scoped by regression IDs instead of a global <code>Limit(2)</code> (0a6efda9).</li>
+  <li><code>sets.Set[uint]</code> used per repo convention in <code>syncRegressions</code>.</li>
+  <li><code>gofmt -l</code> clean on modified files.</li>
+  <li>The <code>4.22-amd64-vs-arm64</code> cross-compare view follows the production <code>5.0-x86-vs-multi-arm</code> pattern.</li>
+  <li>New e2e tests hit endpoints/queries that already exist and correctly filter by seeded <code>release</code> values.</li>
+  <li><code>pkg/api/componentreadiness/dataprovider/postgres/provider.go</code> and <code>pkg/db/models/triage.go</code> are back to their pre-PR state (full revert verified by diff); no residual BigQuery/Postgres parity gap or lateral-join non-determinism remains.</li>
 </ul>
 
 <h2>Open questions for the author</h2>
-<p class="none">None.</p>
+<ul>
+  <li>Is re-running seed-data against an already-seeded database a supported workflow for the new payload/bug/triage helpers, or is a fresh database always assumed?</li>
+</ul>
+
+<h2>Resolved</h2>
+
+<div class="finding should-fix">
+  <h4><span class="sev should-fix">resolved</span>Lateral join picks an arbitrary regression's labels when a job run is tracked by more than one open regression</h4>
+  <p>Reverted entirely in <code>86eb22b7e</code> ("Address review: revert provider changes, add multi-view regression support") per reviewer feedback that the change was too invasive for this PR. <code>provider.go</code>/<code>triage.go</code> are back to pre-PR state.</p>
+</div>
+
+<div class="finding should-fix">
+  <h4><span class="sev should-fix">resolved</span>JobLabels/JobSymptoms mean different things in Postgres vs BigQuery</h4>
+  <p>Moot after the above revert; neither provider carries these fields anymore.</p>
+</div>
 
 </body>
 </html>
