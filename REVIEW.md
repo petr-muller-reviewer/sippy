@@ -18,6 +18,11 @@ refresh_log:
   - from: c192dbd6fff9ce836ff7ce4107152e0cbd1870f5
     to: 9ba64f3e40433fcbfea191c6e1c38c5454f8288e
     summary: "Another rebase onto newer main (old head again not an ancestor of new head), but verified content-identical: diffed the PR's own commit against its parent at both points and every file the PR touches (jira.go, parameters.go, filterable.go, recent_test_failures.go, JobsDetail.jsx, etc.) is byte-identical except one now-redundant import line in pkg/api/tests.go (cloud.google.com/go/civil, already present via the new base). No findings changed. Activity: author requested @coderabbitai review (2026-08-17), CI e2e passed; no human review comments."
+recommended_rereview:
+  - at: 2026-08-20T16:50:06Z
+    old_sha: 9ba64f3e40433fcbfea191c6e1c38c5454f8288e
+    new_sha: 357750ad1313ee2b20e6ea8d49de2eb914d0df21
+    reason: "Real (non-mechanical) content changes this time, >100 net lines across areas the existing review touched: pkg/api/job_runs.go, pkg/api/tests.go, pkg/db/functions.go, pkg/sippyserver/server.go, pkg/flags/postgres_benchmarking_test.go."
 ---
 
 ## Summary
@@ -27,6 +32,19 @@ Replaces epoch millisecond integers with proper time.Time, civil.Date, and RFC 3
 Since last review: branch was rebased onto a much newer `main` (old head `8906ae372` is not an ancestor of the new head `c192dbd6f`), which also pulled in the sippy-ng CRA→Vite migration (`.js` → `.jsx` renames). This warranted a full re-review rather than an incremental refresh. Two new issues surfaced during that re-review: a silently dropped `OVERLAPS` where-clause in `pkg/api/jira.go` that changes which JIRA incidents are returned, and dropped timestamp filter validation in `splitJobAndJobRunFilters`.
 
 Since previous review: branch was rebased again (`c192dbd6f` → `9ba64f3e4`, old head again not an ancestor of new). Verified the PR's own diff is content-identical across the rebase except one now-redundant import line in `pkg/api/tests.go`; no findings changed as a result. Author requested a CodeRabbit review; CI e2e passed; no new human review activity.
+
+## Re-review Recommended
+
+### 2026-08-20T16:50:06Z — 9ba64f3e40433fcbfea191c6e1c38c5454f8288e..357750ad1313ee2b20e6ea8d49de2eb914d0df21
+- PR title dropped its `[WIP]` prefix (now "TRT-2364: Fix timestamp and date type inconsistencies"), suggesting the author considers it ready.
+- Old head is again not an ancestor of the new head (another rebase), but unlike the prior two rebases this one carries real content changes, not just mechanical rebase drift. `git diff --stat` between the two heads, restricted to the PR's own file list, shows 603 insertions / 336 deletions across 14 files:
+  - `pkg/db/functions.go` (+185/-… ) — the `job_results` SQL function signature changed: params renamed (`release`→`p_release`, `start`→`p_start`, etc.) and several columns/params changed from `timestamp without time zone` to `timestamptz`; a `max(prow_job_runs.timestamp)::timestamp without time zone` cast was dropped.
+  - `pkg/flags/postgres_benchmarking_test.go` (460 lines changed, largest single-file delta) — adds a new `sortedDateKeys[V any](m map[civil.Date]V) []string` helper alongside the existing `sortedMapKeys`, and reworks call sites to use it for `civil.Date`-keyed maps.
+  - `pkg/sippyserver/server.go` (76 lines), `pkg/api/tests.go` (90 lines), `pkg/api/job_runs.go` (53 lines) — all areas this review's existing findings already touch (`splitJobAndJobRunFilters`, filter validation, timestamp/date handling).
+  - Also touched: `cmd/sippy/seed_data.go`, `pkg/api/jobs.go`, `pkg/api/releases.go`, `pkg/db/query/test_queries.go`, `sippy-ng/src/build_clusters/BuildClusterDetails.jsx`, `sippy-ng/src/jobs/JobRunsTable.jsx`, `sippy-ng/src/jobs/JobTable.jsx`, `test/integration/job_runs_report_test.go`, `test/integration/jobs_test.go`.
+- Why this exceeds "update in place": both the "significant new code in areas existing findings touched" trigger and the "force-pushed/rewritten large sections" trigger fired together. This is unlike the 2026-08-19 refresh, where a similarly-shaped rebase was verified byte-identical in content — this one is not: the SQL function signature and a new generic helper are genuinely new work, not rebase noise.
+- Activity since 2026-08-19T11:24:41Z: 2026-08-20T01:41 openshift-merge-bot scheduled required e2e tests; 2026-08-20T02:28 openshift-ci reported all tests passed. No new inline review comments or PR reviews.
+- Existing findings from the 2026-08-08 full re-review were not re-verified against this head; they may need re-checking once a full re-review runs, especially the `splitJobAndJobRunFilters`/`pkg/sippyserver/server.go`-related findings given `server.go` changed again.
 
 ## Findings
 

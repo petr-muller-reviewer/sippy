@@ -90,6 +90,15 @@
     font-size: 0.92rem;
     margin: 1rem 0;
   }
+  .rereview {
+    background: #fff8f0;
+    border: 1px solid #ffd9a8;
+    border-left: 5px solid #bf6a02;
+    border-radius: 6px;
+    padding: 0.9rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .rereview h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
 </style>
 </head>
 <body>
@@ -125,6 +134,25 @@
   <li>Rewrites <code>JobsDetail</code> day bucketing to use <code>Temporal.PlainDate</code>.</li>
   <li>Updates project coding standards (CLAUDE.md, APM instructions) with timestamp/date guidelines.</li>
 </ul>
+
+<h2>Re-review Recommended</h2>
+<div class="rereview">
+  <h4>2026-08-20T16:50:06Z &mdash; <code>9ba64f3e4</code>..<code>357750ad1</code></h4>
+  <ul>
+    <li>PR title dropped its <code>[WIP]</code> prefix (now "TRT-2364: Fix timestamp and date type inconsistencies"), suggesting the author considers it ready.</li>
+    <li>Old head is again not an ancestor of the new head (another rebase), but unlike the prior two rebases this one carries real content changes, not just mechanical rebase drift. <code>git diff --stat</code> between the two heads, restricted to the PR's own file list, shows 603 insertions / 336 deletions across 14 files:
+      <ul>
+        <li><code>pkg/db/functions.go</code> (185 lines changed) &mdash; the <code>job_results</code> SQL function signature changed: params renamed (<code>release</code>&rarr;<code>p_release</code>, <code>start</code>&rarr;<code>p_start</code>, etc.) and several columns/params changed from <code>timestamp without time zone</code> to <code>timestamptz</code>; a <code>max(prow_job_runs.timestamp)::timestamp without time zone</code> cast was dropped.</li>
+        <li><code>pkg/flags/postgres_benchmarking_test.go</code> (460 lines changed, largest single-file delta) &mdash; adds a new <code>sortedDateKeys[V any](m map[civil.Date]V) []string</code> helper alongside the existing <code>sortedMapKeys</code>, and reworks call sites to use it for <code>civil.Date</code>-keyed maps.</li>
+        <li><code>pkg/sippyserver/server.go</code> (76 lines), <code>pkg/api/tests.go</code> (90 lines), <code>pkg/api/job_runs.go</code> (53 lines) &mdash; all areas this review's existing findings already touch (<code>splitJobAndJobRunFilters</code>, filter validation, timestamp/date handling).</li>
+        <li>Also touched: <code>cmd/sippy/seed_data.go</code>, <code>pkg/api/jobs.go</code>, <code>pkg/api/releases.go</code>, <code>pkg/db/query/test_queries.go</code>, <code>sippy-ng/src/build_clusters/BuildClusterDetails.jsx</code>, <code>sippy-ng/src/jobs/JobRunsTable.jsx</code>, <code>sippy-ng/src/jobs/JobTable.jsx</code>, <code>test/integration/job_runs_report_test.go</code>, <code>test/integration/jobs_test.go</code>.</li>
+      </ul>
+    </li>
+    <li>Why this exceeds "update in place": both the "significant new code in areas existing findings touched" trigger and the "force-pushed/rewritten large sections" trigger fired together. This is unlike the 2026-08-19 refresh, where a similarly-shaped rebase was verified byte-identical in content &mdash; this one is not: the SQL function signature and a new generic helper are genuinely new work, not rebase noise.</li>
+    <li>Activity since 2026-08-19T11:24:41Z: 2026-08-20T01:41 openshift-merge-bot scheduled required e2e tests; 2026-08-20T02:28 openshift-ci reported all tests passed. No new inline review comments or PR reviews.</li>
+    <li>Existing findings from the 2026-08-08 full re-review were not re-verified against this head; they may need re-checking once a full re-review runs, especially the <code>splitJobAndJobRunFilters</code>/<code>pkg/sippyserver/server.go</code>-related findings given <code>server.go</code> changed again.</li>
+  </ul>
+</div>
 
 <h2>Findings</h2>
 
