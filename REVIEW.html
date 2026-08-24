@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review of openshift/sippy#3928</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #1a1a1a; max-width: 860px; margin: 2rem auto; padding: 0 1.5rem; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  header { border-bottom: 2px solid #ddd; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.5rem 0; }
+  header dt { font-weight: 600; color: #555; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .verdict { background: #e6f4ea; border: 1px solid #b7e0c2; padding: 1rem; border-radius: 6px; }
+  .verdict.approve { background: #e6f4ea; border-color: #b7e0c2; }
+  ul { padding-left: 1.4rem; }
+  code { background: #f2f2f2; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review of openshift/sippy#3928</h1>
+  <dl>
+    <dt>Title</dt><dd>TRT-2914: CR Parity Gap: PG provider does not apply the IgnoreDisruption test filter</dd>
+    <dt>PR</dt><dd><a href="https://github.com/openshift/sippy/pull/3928">openshift/sippy#3928</a></dd>
+    <dt>Head SHA</dt><dd><code>5c8df6287ee9981b0814def75995e109a91b37c9</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-24T10:27:13Z</dd>
+  </dl>
+</header>
+
+<section class="verdict approve">
+  <strong>Verdict: Approve.</strong>
+  <p>Small, well-scoped parity fix: the Postgres component-readiness provider gains the same <code>IgnoreDisruption</code> filter the BigQuery provider already applies, using the identical capability string. The change is a 4-line addition, builds cleanly, and is covered by a passing integration test. PR is merged.</p>
+</section>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds an <code>IgnoreDisruption</code> clause to <code>buildDrilldownFilters</code> in the Postgres data provider, appending <code>AND NOT ('Disruption' = ANY(tow.capabilities))</code> to the outer clause when <code>reqOptions.AdvancedOption.IgnoreDisruption</code> is set.</li>
+  <li>Brings the Postgres provider to parity with the BigQuery provider, which already excludes tests carrying the <code>Disruption</code> capability under this option.</li>
+  <li>The clause is a literal string match against the ANY() array, so it needs no query placeholder/argument &mdash; <code>outerArgs</code> is left untouched.</li>
+</ul>
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>The original 135-line unit test file <code>cr_queries_test.go</code> was removed and replaced with a real-database integration test, <code>TestIgnoreDisruptionFilter</code> in <code>test/integration/component_readiness_test.go</code> (modeled after the existing <code>TestCapabilitiesArrayOverlapFilter</code>).</li>
+  <li>The new test seeds test ownerships with and without the <code>Disruption</code> capability and checks the filter's effect on <code>QueryTestStatus</code> results in three cases: filter on, filter off, and filter combined with an explicit capabilities filter.</li>
+  <li>PR merged at head <code>5c8df6287</code>; approved by neisw, self-approved by openshift-trt-agent[bot], CI all-green.</li>
+</ul>
+
+<h2>Findings</h2>
+<p>None. No blocking, should-fix, or nit issues identified.</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Parity with BigQuery: <code>pkg/api/componentreadiness/dataprovider/bigquery/querygenerators.go:453</code> uses the same literal <code>'Disruption'</code> capability string.</li>
+  <li>No placeholder/argument mismatch: the new clause has no bind parameter, so <code>outerArgs</code> ordering is unaffected by the addition.</li>
+  <li><code>TestIgnoreDisruptionFilter</code> exercises the filter against a real Postgres instance, covering the on/off/combined-filter cases.</li>
+  <li><code>go build</code> and the test suite pass.</li>
+  <li>PR state, reviews, and CI activity since the previous review: merged, approved, all tests green.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<p>None.</p>
+
+</body>
+</html>
