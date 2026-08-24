@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3913</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.6; color: #1a1a1a; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  header { border-bottom: 2px solid #ddd; padding-bottom: 1rem; margin-bottom: 1.5rem; }
+  header dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.5rem 0; }
+  header dt { font-weight: 600; color: #555; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  h2 { border-bottom: 1px solid #eee; padding-bottom: 0.3rem; margin-top: 2rem; }
+  .verdict { font-size: 1.1rem; font-weight: 600; padding: 0.75rem 1rem; border-radius: 6px; }
+  .verdict.request-changes { background: #fdeceb; color: #86181d; border: 1px solid #f3c6c3; }
+  .finding { border: 1px solid #e2e2e2; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+  .finding h3 { margin: 0 0 0.5rem 0; font-size: 1.05rem; }
+  .sev { display: inline-block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+         padding: 0.15rem 0.5rem; border-radius: 4px; margin-right: 0.5rem; }
+  .sev.blocking { background: #f85149; color: white; }
+  .sev.should-fix { background: #d4a017; color: white; }
+  .sev.nit { background: #6e7781; color: white; }
+  .loc { font-family: monospace; background: #f6f8fa; padding: 0.1rem 0.4rem; border-radius: 4px; }
+  pre { background: #f6f8fa; padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+  ul { padding-left: 1.3rem; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Review: openshift/sippy #3913</h1>
+  <p><em>TRT-2895: Force close regressions</em> &mdash; <a href="https://github.com/openshift/sippy/pull/3913">github.com/openshift/sippy/pull/3913</a></p>
+  <dl>
+    <dt>Head SHA</dt><dd><code>a9599901ce96483a03d09e3532c40feebd7e3d84</code></dd>
+    <dt>Base</dt><dd><code>main</code></dd>
+    <dt>Reviewed at</dt><dd>2026-08-20T16:49:23Z</dd>
+  </dl>
+</header>
+
+<h2>Verdict</h2>
+<p class="verdict request-changes">Request changes</p>
+<p>The prior TOCTOU race and missing-HATEOAS findings are resolved by this round's rewrite, but the blocking multi-triage scoping gap survives the rewrite unchanged, and a new related issue surfaced: auto-resolution now mislabels triages that only resolved because their regressions were force-closed. These need addressing before merge.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Adds force-close for test regressions tied to a resolved triage: <code>ForceCloseRegressions</code> and a dry-run <code>ForceClosePreview</code> in <code>pkg/api/componentreadiness/regressiontracker.go</code>, exposed via <code>jsonForceCloseRegressions</code>/<code>jsonForceClosePreview</code> in <code>pkg/sippyserver/server.go</code>.</li>
+  <li>Force-closing is a single atomic <code>UPDATE ... WHERE id IN (subquery on triage_regressions) AND closed IS NULL AND opened &lt; closeTime ... RETURNING id</code>, stamping <code>force_closed</code>, <code>force_closed_by</code>, <code>force_closed_reason</code>, <code>force_closed_by_triage_id</code>, and a <code>closed</code> timestamp from the triage's resolution time.</li>
+  <li><code>ResolveTriages</code>'s auto-resolution check now treats <code>force_closed</code> regressions as inactive, so a triage whose regressions are all force-closed can auto-resolve.</li>
+  <li>New response types carry HATEOAS <code>Links</code> via <code>InjectForceCloseHATEOASLinks</code>/<code>InjectForceClosePreviewHATEOASLinks</code>.</li>
+  <li>Adds integration coverage (<code>test/integration/regression_forceclose_test.go</code>, <code>test/integration/util/fixtures.go</code>); removes the redundant SQL migration.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <h3><span class="sev blocking">Blocking</span> force-close scoped only by the given triage, ignoring multi-triage regression linkage</h3>
+  <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:379-382</span></p>
+  <p><code>TestRegression.Triages</code> is many-to-many via <code>triage_regressions</code>, but the force-close UPDATE's eligibility subquery is scoped only to the given triage ID. If a regression is also linked to a different, still-open triage B, force-closing via triage A sets <code>force_closed=true</code> globally. Since <code>ResolveTriages</code> (line 233) excludes <code>force_closed</code> rows from its open-regression check, triage B can then auto-resolve using triage A's unrelated resolution time. Confirmed against the current query shape &mdash; this survived the rewrite from select-then-update to a single atomic UPDATE.</p>
+  <pre>Where("test_regressions.id IN (?)",
+    prs.dbc.DB.Table("triage_regressions").
+        Select("test_regression_id").
+        Where("triage_id = ?", triageID)).
+Where("test_regressions.closed IS NULL").
+Where("test_regressions.opened &lt; ?", closeTime).</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev should-fix">Should fix</span> ResolveTriages mislabels force-closed triages as auto-resolved rollouts</h3>
+  <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:266</span></p>
+  <p>Since the <code>NOT EXISTS</code> subquery at line 233 now treats force-closed regressions as inactive, a triage whose only regressions were force-closed can auto-resolve through this path. Line 266 unconditionally sets <code>ResolutionReason = models.RegressionsRolledOff</code>, mislabeling a deliberate human force-close as an automatic rollout and discarding the real force-close reason.</p>
+  <pre>triage.ResolutionReason = models.RegressionsRolledOff</pre>
+</div>
+
+<div class="finding">
+  <h3><span class="sev should-fix">Should fix</span> force-close endpoint has stricter auth behavior than sibling triage-write endpoints</h3>
+  <p><span class="loc">pkg/sippyserver/server.go:488</span></p>
+  <p><code>jsonForceCloseRegressions</code> hard-401s whenever <code>getUserForRequest()</code> returns empty, unlike <code>jsonCreateTriage</code>/<code>jsonUpdateTriage</code>/<code>jsonDeleteTriage</code>, which proceed and merely log the (possibly empty) user. <code>getUserForRequest</code> returns <code>""</code> whenever <code>X-Forwarded-User</code> is unset and <code>DEV_MODE != "1"</code>, so a developer who can otherwise manage triages locally gets an unexpected 401 specifically on force-close. May be intentional (audit requirement) but is an undocumented inconsistency.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev should-fix">Should fix</span> deleting a triage leaves stale force_closed_by_triage_id references</h3>
+  <p><span class="loc">pkg/db/models/triage.go:247</span></p>
+  <p><code>ForceClosedByTriageID</code> has no FK/cascade handling, and <code>jsonDeleteTriage</code> never clears it. Deleting a triage that previously force-closed regressions leaves <code>test_regressions.force_closed_by_triage_id</code> pointing at a nonexistent row; the HATEOAS links built from that stale ID 404, and the audit trail can no longer be resolved.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev nit">Nit</span> duplicated HATEOAS URL-building logic</h3>
+  <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:388</span></p>
+  <p><code>forceCloseTriageLinks</code>/<code>regressionDetailLink</code> hand-roll the same URL format strings already defined and used via <code>injectHATEOASLinks</code>/<code>InjectRegressionHATEOASLinks</code> in <code>pkg/api/componentreadiness/triage.go</code>. A route rename is likely to update only one copy.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev nit">Nit</span> duplicated "load triage, check Resolved" validation</h3>
+  <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:354</span></p>
+  <p><code>ForceCloseRegressions</code> and <code>ForceClosePreview</code> duplicate an identical block that loads the triage, wraps the error, and checks <code>Resolved.Valid</code>.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev nit">Nit</span> redundant paired queries in failure-gap lookup</h3>
+  <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:286</span></p>
+  <p><code>queryRegressionFailureGaps</code> runs two near-identical grouped queries against <code>regression_job_runs</code> that could be one conditional-aggregation query, doubling DB round trips per preview call.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev nit">Nit</span> ad hoc, uncapped trailing-JSON body validation</h3>
+  <p><span class="loc">pkg/sippyserver/server.go:503</span></p>
+  <p>The decode-twice-to-<code>io.EOF</code> trick for rejecting trailing JSON is reinvented ad hoc for this one endpoint, with no size cap, and no sibling write endpoint performs this check.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>The rewritten single-UPDATE force-close (subquery + <code>closed IS NULL</code> + <code>opened &lt; closeTime</code>, <code>RETURNING id</code>) closes the prior TOCTOU race between select and update.</li>
+  <li>New response types now populate <code>Links</code>, addressing the prior missing-HATEOAS finding.</li>
+  <li>Handlers no longer echo raw <code>err.Error()</code> and handle <code>gorm.ErrRecordNotFound</code> with 404; user identity is no longer logged.</li>
+  <li>No SQL injection concerns; all queries are parameterized gorm calls.</li>
+  <li>New integration tests exercise the happy path and several edge cases, but do not appear to cover the multi-triage-sharing scenario in the blocking finding above.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is a regression ever expected to be linked to more than one triage in practice, or is <code>triage_regressions</code> many-to-many purely a schema affordance that's unused today?</li>
+  <li>Is the force-close 401-on-missing-user behavior intentional and stricter than other triage-write endpoints by design, or an oversight from copying a different code path?</li>
+  <li>Should <code>ResolveTriages</code> record a different resolution reason (or preserve the force-close reason) when a triage auto-resolves purely because its regressions were force-closed?</li>
+</ul>
+
+</body>
+</html>
