@@ -1,10 +1,15 @@
 ---
 pr: openshift/sippy#3913
 title: "TRT-2895: Force close regressions"
-head_sha: a9599901ce96483a03d09e3532c40feebd7e3d84
+head_sha: 96bfb7a25322a5c26e241143f3c4a94ee234e142
 base: main
-reviewed_at: 2026-08-20T16:49:23Z
+reviewed_at: 2026-08-24T15:59:59Z
 verdict: request-changes
+refresh_log:
+  - old_head_sha: a9599901ce96483a03d09e3532c40feebd7e3d84
+    new_head_sha: 96bfb7a25322a5c26e241143f3c4a94ee234e142
+    at: 2026-08-24T15:59:59Z
+    summary: "Single commit (TRT-2895: Use test_failures > 0 in force-close gap query) switches queryRegressionFailureGaps' WHERE clauses from test_failed = true to test_failures > 0; no findings resolved, none newly introduced."
 ---
 
 ## What this PR does
@@ -14,6 +19,8 @@ verdict: request-changes
 - `ResolveTriages`'s auto-resolution `NOT EXISTS` check now treats `force_closed` regressions as inactive (`closed IS NULL OR (closed > ? AND force_closed = false)`), so a triage whose regressions are all force-closed can auto-resolve.
 - New `ForceCloseResult`/`ForceClosePreview`/`ForceClosePreviewRegression` response types carry HATEOAS `Links` via `InjectForceCloseHATEOASLinks`/`InjectForceClosePreviewHATEOASLinks`.
 - Adds integration coverage in `test/integration/regression_forceclose_test.go` and shared fixtures in `test/integration/util/fixtures.go`; removes the now-redundant `000013_add_force_close_to_regressions` SQL migration.
+
+Since previous review: one targeted commit switches `queryRegressionFailureGaps`' failure-detection predicate from `test_failed = true` to `test_failures > 0` in both grouped queries (correctness fix on the underlying column semantics, not a structural change). No prior findings resolved or newly introduced.
 
 ## Findings
 
@@ -52,7 +59,7 @@ verdict: request-changes
 
 ### [nit] redundant paired queries in failure-gap lookup
 - where: `pkg/api/componentreadiness/regressiontracker.go:286`
-- concern: `queryRegressionFailureGaps` runs two near-identical grouped queries against `regression_job_runs` (`MAX(start_time) ... <= resolutionTime` then `MIN(start_time) ... > resolutionTime`) that could be one conditional-aggregation query. Doubles DB round trips on every preview call.
+- concern: `queryRegressionFailureGaps` runs two near-identical grouped queries against `regression_job_runs` (`MAX(start_time) ... <= resolutionTime` then `MIN(start_time) ... > resolutionTime`) that could be one conditional-aggregation query. Doubles DB round trips on every preview call. (2026-08-24: both queries' failure predicate was corrected from `test_failed = true` to `test_failures > 0`; the duplication itself is unchanged.)
 
 ### [nit] ad hoc, uncapped trailing-JSON body validation
 - where: `pkg/sippyserver/server.go:503`

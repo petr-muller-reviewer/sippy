@@ -33,9 +33,9 @@
   <h1>Review: openshift/sippy #3913</h1>
   <p><em>TRT-2895: Force close regressions</em> &mdash; <a href="https://github.com/openshift/sippy/pull/3913">github.com/openshift/sippy/pull/3913</a></p>
   <dl>
-    <dt>Head SHA</dt><dd><code>a9599901ce96483a03d09e3532c40feebd7e3d84</code></dd>
+    <dt>Head SHA</dt><dd><code>96bfb7a25322a5c26e241143f3c4a94ee234e142</code></dd>
     <dt>Base</dt><dd><code>main</code></dd>
-    <dt>Reviewed at</dt><dd>2026-08-20T16:49:23Z</dd>
+    <dt>Reviewed at</dt><dd>2026-08-24T15:59:59Z</dd>
   </dl>
 </header>
 
@@ -51,6 +51,7 @@
   <li>New response types carry HATEOAS <code>Links</code> via <code>InjectForceCloseHATEOASLinks</code>/<code>InjectForceClosePreviewHATEOASLinks</code>.</li>
   <li>Adds integration coverage (<code>test/integration/regression_forceclose_test.go</code>, <code>test/integration/util/fixtures.go</code>); removes the redundant SQL migration.</li>
 </ul>
+<p><em>Since previous review:</em> one targeted commit switches <code>queryRegressionFailureGaps</code>' failure-detection predicate from <code>test_failed = true</code> to <code>test_failures &gt; 0</code> in both grouped queries (correctness fix on the underlying column semantics, not a structural change). No prior findings resolved or newly introduced.</p>
 
 <h2>Findings</h2>
 
@@ -100,7 +101,7 @@ Where("test_regressions.opened &lt; ?", closeTime).</pre>
 <div class="finding">
   <h3><span class="sev nit">Nit</span> redundant paired queries in failure-gap lookup</h3>
   <p><span class="loc">pkg/api/componentreadiness/regressiontracker.go:286</span></p>
-  <p><code>queryRegressionFailureGaps</code> runs two near-identical grouped queries against <code>regression_job_runs</code> that could be one conditional-aggregation query, doubling DB round trips per preview call.</p>
+  <p><code>queryRegressionFailureGaps</code> runs two near-identical grouped queries against <code>regression_job_runs</code> that could be one conditional-aggregation query, doubling DB round trips per preview call. (2026-08-24: both queries' failure predicate was corrected from <code>test_failed = true</code> to <code>test_failures &gt; 0</code>; the duplication itself is unchanged.)</p>
 </div>
 
 <div class="finding">
