@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Review: openshift/sippy#3926</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; color: #1b1f23; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+  pre { background: #f6f8fa; padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  code.inline { background: #f6f8fa; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.9em; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.2rem; border-bottom: 1px solid #e1e4e8; padding-bottom: 0.3rem; margin-top: 2.2rem; }
+  .meta { background: #f6f8fa; padding: 1rem 1.2rem; border-radius: 6px; font-size: 0.9rem; }
+  .meta div { margin: 0.15rem 0; }
+  .verdict { font-size: 1.1rem; font-weight: 600; padding: 0.6rem 1rem; border-radius: 6px; background: #dafbe1; color: #116329; display: inline-block; }
+  .finding { border-left: 4px solid #d29922; background: #fffbe6; padding: 0.8rem 1.2rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .finding.question { border-left-color: #57606a; background: #f6f8fa; }
+  .finding h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .loc { color: #57606a; font-size: 0.85rem; }
+  ul { padding-left: 1.4rem; }
+  .hl { background: #fff5b1; }
+</style>
+</head>
+<body>
+
+<h1>Review: openshift/sippy#3926</h1>
+<div class="meta">
+  <div><strong>PR:</strong> <a href="https://github.com/openshift/sippy/pull/3926">openshift/sippy#3926</a></div>
+  <div><strong>Title:</strong> TRT-2883: Fix spurious MissingSample/MissingBasis for tests below MinimumFailure</div>
+  <div><strong>Head SHA:</strong> <code class="inline">67da3e982705e7f7d4002999918fa516c7b03da6</code></div>
+  <div><strong>Base:</strong> main</div>
+  <div><strong>Reviewed at:</strong> 2026-08-21T15:14:28Z</div>
+</div>
+
+<h2>Verdict</h2>
+<p><span class="verdict">Approve</span></p>
+<p>The fix is well-targeted and thoroughly tested: it closes a real PostgreSQL/BigQuery parity gap where tests below <code class="inline">MinimumFailure</code> that only existed on one side, or crossed the threshold between sides, were silently dropped instead of surfacing as <code class="inline">MissingSample</code>/<code class="inline">MissingBasis</code>. New integration tests cover all four quadrants (both above, one above/one below in each direction, both below, one-sided) plus a full end-to-end report test. No correctness issues found; remaining points are cleanup/design-quality and worth a comment but not blocking.</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Fixes TRT-2883: PostgreSQL previously filtered out below-<code class="inline">MinimumFailure</code> tests at the SQL level, unlike BigQuery, causing one-sided or threshold-crossing tests to vanish from both result maps instead of showing as Missing*.</li>
+  <li>Standalone path (<code class="inline">queryTestStatusCTE</code>, feeds release-fallback) drops the SQL filter entirely — new <code class="inline">testBranchTemplate</code> replaces <code class="inline">failureBranchTemplate</code> — and relies on the existing Go-side check.</li>
+  <li>Combined path (<code class="inline">queryCombinedTestStatus</code>) keeps the per-side <code class="inline">>= MinimumFailure</code> filter and adds a new <code class="inline">belowThresholdRescueBranchTemplate</code>: a LEFT JOIN against a narrow materialized <code class="inline">keysCTETemplate</code> of the other side, rescuing rows with no counterpart or a counterpart at/above threshold.</li>
+  <li><code class="inline">minimumFailure</code> removed from <code class="inline">variantQuerySetup</code>/<code class="inline">prepareVariantQuery</code> since only the combined path still needs it (passed directly as an SQL arg).</li>
+  <li>Integration tests: flipped an existing expectation (now correctly rescued), added both-below/one-sided coverage for the combined path, and extended <code class="inline">TestGenerateReport_MinimumFailureThreshold</code> with reverse-direction and both-below cases through full Fisher-exact analysis.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3 style="margin-top:1.5rem;">Should fix</h3>
+<div class="finding">
+  <h3>Duplicated column list across three near-identical branch templates</h3>
+  <div class="loc"><code class="inline">pkg/api/componentreadiness/dataprovider/postgres/cr_queries.go:187-253</code></div>
+  <p><code class="inline">testBranchTemplate</code>, <code class="inline">failureBranchTemplate</code>, and <code class="inline">belowThresholdRescueBranchTemplate</code> repeat the identical SELECT/FROM/JOIN column list, differing only in the WHERE clause / extra join. A future column change (e.g. for the row scanner) means editing three string constants in lockstep — miss one and you get a column-count/order mismatch that surfaces as a scan error or silently wrong data, not a compile failure.</p>
+  <pre>const testBranchTemplate = `SELECT
+    %spa.unique_id AS test_id, t.name AS test_name,
+    COALESCE(su.name, '') AS test_suite, pa.component, pa.capabilities,
+    pa.variant_group_id, pa.total_count, pa.success_count, pa.flake_count, pa.last_failure
+FROM %s pa
+JOIN tests t ON t.id = pa.test_id
+LEFT JOIN suites su ON su.id = pa.suite_id`</pre>
+</div>
+
+<h3 style="margin-top:1.5rem;">Questions</h3>
+<div class="finding question">
+  <h3>Same invariant enforced via two independent mechanisms</h3>
+  <div class="loc"><code class="inline">cr_queries.go:274-310</code> (standalone) vs <code class="inline">cr_queries.go:410-506</code> (combined)</div>
+  <p>The standalone path drops the SQL filter and relies solely on the Go-side check; the combined path keeps the filter and adds a bespoke rescue join. Both fix the same bug but share no code — a future change to <code class="inline">MinimumFailure</code> semantics needs updating both independently. Is this divergence intentional, or worth a shared test tying the two behaviors together as a guardrail?</p>
+</div>
+<div class="finding question">
+  <h3>queryTestStatusCTE now returns unfiltered base-side rows for release-fallback</h3>
+  <div class="loc"><code class="inline">cr_queries.go:274-310</code></div>
+  <p><code class="inline">queryTestStatusCTE</code> feeds <code class="inline">QueryBaseTestStatus</code>, used by the release-fallback middleware, which caches per-release <code class="inline">BaseStatus</code> maps across fallback releases. Removing the SQL-side floor grows that result set (and the cache) to include all low-count tests. Not a correctness issue, but worth confirming this doesn't meaningfully increase fallback-cache memory for high-fanout scenarios.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>Argument-binding order for <code class="inline">belowThresholdRescueBranchTemplate</code> (two placeholders per side) matches the <code class="inline">allArgs</code> append order in <code class="inline">queryCombinedTestStatus</code>.</li>
+  <li><code class="inline">gofmt -l</code> clean on the changed file.</li>
+  <li>BigQuery parity: BigQuery never had a SQL-side <code class="inline">MinimumFailure</code> filter, so this PR brings Postgres in line with BigQuery's existing behavior — no BigQuery-side change needed.</li>
+  <li>New integration tests cover all four quadrants (both above, each direction of one-above/one-below, both below, one-sided) plus a full report-level Fisher-exact test.</li>
+  <li><code class="inline">variantQuerySetup.minimumFailure</code> field removal is fully reference-checked (only used by the now-removed standalone filter).</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the split between "no SQL filter, Go-side check only" (standalone) and "SQL filter + rescue join" (combined) meant to be permanent, or worth unifying in a followup?</li>
+  <li>For large components/variant combinations, has the rescue join's plan cost against the materialized keys CTEs been compared to the old combined-query plan?</li>
+</ul>
+
+</body>
+</html>
