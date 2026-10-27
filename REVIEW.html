@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>openshift/sippy#4150</title><style>
+:root { --bg:#fff; --fg:#1f2328; --muted:#59636e; --border:#d1d9e0; --code-bg:#f6f8fa;
+  --link:#0969da; --red:#cf222e; --amber:#9a6700; --green:#1a7f37; --blue:#0969da; --gray:#59636e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1;
+  --border:#3d444d; --code-bg:#151b23; --link:#4493f8; --red:#f85149; --amber:#d29922;
+  --green:#3fb950; --blue:#4493f8; --gray:#9198a1; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:52rem; margin:0 auto; padding:2rem 1rem 4rem; }
+h1 { font-size:1.6rem; margin:0 0 .25rem; line-height:1.3; }
+h2 { font-size:1.25rem; margin:2.25rem 0 .75rem; padding-bottom:.3rem; border-bottom:1px solid var(--border); }
+h3 { font-size:1.05rem; margin:1.5rem 0 .5rem; }
+h4 { font-size:1rem; margin:1.25rem 0 .5rem; }
+a { color:var(--link); }
+code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.875em; }
+code { background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+pre { background:var(--code-bg); padding:.75rem 1rem; border-radius:6px; overflow-x:auto; line-height:1.45; }
+pre code { background:none; padding:0; }
+blockquote { margin:0; padding:0 1rem; color:var(--muted); border-left:3px solid var(--border); }
+ul, ol { padding-left:1.5rem; }
+.meta { color:var(--muted); font-size:.9rem; margin:.25rem 0 1rem; }
+.meta code { font-size:.85em; }
+.badges { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
+.badge, .tag { display:inline-block; border:1px solid currentColor; border-radius:999px;
+  padding:.05rem .6rem; font-size:.8rem; font-weight:600; white-space:nowrap; }
+.tag { margin-right:.4rem; vertical-align:.1em; }
+.c-red { color:var(--red); } .c-amber { color:var(--amber); } .c-green { color:var(--green); }
+.c-blue { color:var(--blue); } .c-gray { color:var(--gray); }
+details { margin:1rem 0; } summary { cursor:pointer; color:var(--muted); font-size:.9rem; }
+</style></head><body><main>
+<h1>TRT-2631: Prep for BDD tests</h1>
+<div class="meta"><a href="https://github.com/openshift/sippy/pull/4150">openshift/sippy#4150</a> · base <code>main</code> · head_sha <code>a237d3036ae1</code> · reviewed_at <code>2026-10-27T17:50:54Z</code></div>
+<div class="badges"><span class="badge c-green">verdict: approve</span></div>
+<h2>Verdict</h2>
+<p>Approve: no defect found in the merge-base diff; the remaining risk is test coverage of the new race guards, not the code itself.</p>
+<p>The PR is narrow and internally consistent. It installs Playwright's Chromium runtime libraries in the CI build image, adds stable <code>data-testid</code> hooks for the upcoming BDD suite, and hardens Component Readiness against overlapping report fetches. I traced the guard through the success, error, and abort paths of each page, checked that the moved early returns no longer skip hooks, and confirmed that rendering the sidebar during the initial main-page load cannot touch uninitialized context (<code>App.jsx</code> gates routes on <code>/api/releases</code>, and <code>CompReadyVars</code> initializes <code>views</code>, <code>allJobVariants</code>, and <code>dbGroupByVariants</code> to <code>[]</code>). The triage changes (<code>null</code> regressions, form/list sync on same-id reload, inline delete errors) remove real crashes. CI is green on the reviewed SHA for unit, lint, e2e, build, and images.</p>
+<h2>What this PR does</h2>
+<ul>
+<li>Adds the X11/ATK/NSS/cairo/pango/alsa runtime packages Playwright's Chromium needs to <code>Dockerfile.buildroot</code>, so browser-driven tests can run in the CI build image.
+</li>
+<li>Adds <code>data-testid</code> attributes across Component Readiness: component/capability/test links, report cells, generate-report buttons, toolbar search/red-only controls, triage buttons and submit, force-close buttons, and the regressed-tests modal tabs.
+</li>
+<li>Adds <code>createLatestRequest</code> (<code>CompReadyUtils.jsx</code>) and applies it to the main report, capabilities, capability, capability-test, and test-details fetches, so a superseded response can no longer replace a newer selection or clear its loading state.
+</li>
+<li>Moves the <code>fetchError</code> and <code>CompReadyCancelled</code> returns below every hook in <code>ComponentReadiness.jsx</code> and <code>CompReadyEnvCapability.jsx</code>, fixing the "rendered fewer hooks" unmount; also hardens <code>gotFetchError</code> against non-string errors.
+</li>
+<li>Makes triage rendering tolerant of <code>regressions: null</code> (<code>UpdateTriagePanel</code>, <code>TriagedRegressionTestList</code>), keeps the update form and regression list in sync with a reloaded record (<code>UpsertTriageModal</code>, <code>TriagedRegressionTestList</code>), keeps the triage page mounted on same-id reload so force-close state survives, and reports delete failures inline instead of replacing the page.
+</li></ul>
+<h2>Findings</h2>
+<p>No findings.</p>
+<h2>Checked</h2>
+<ul>
+<li>Merge-base diff <code>bc130e0247f7fb0b6bda1788d72f39b214b37aa4..a237d3036</code>, 27 files, +311/−72, matches the PR's reported 311/72.
+</li>
+<li>Stale-guard semantics in all five pages: stale success, stale error, and stale <code>finally</code> are dropped; the newest request still sets <code>isLoaded</code>, including after <code>AbortError</code> replaces the shared <code>abortController</code>.
+</li>
+<li>Hook ordering: every <code>useState</code>/<code>useEffect</code>/<code>useQueryParam</code>/<code>useContext</code> call precedes the moved returns in <code>ComponentReadiness.jsx</code>, <code>CompReadyEnvCapability.jsx</code>, <code>CompReadyEnvCapabilityTest.jsx</code>, <code>CompReadyEnvCapabilities.jsx</code>, and <code>TestDetailsReport.jsx</code>.
+</li>
+<li>Safety of rendering <code>Sidebar</code>/<code>CompReadyMainInputs</code> while the main report is still loading: releases are loaded before routes render (<code>App.jsx</code> <code>if (!isLoaded) return Loading</code>), and all list props used by <code>CompReadyMainInputs</code>/<code>ReleaseSelector</code> start as <code>[]</code>/<code>{}</code>.
+</li>
+<li><code>UpsertTriageModal</code> prop sync against all three call sites: <code>Triage.jsx</code> passes <code>triage</code> (update mode), <code>TestDetailsReport.jsx</code> and <code>RegressedTestsPanel.jsx</code> pass only <code>regressionIds</code>, so the new effect is a no-op in add mode.
+</li>
+<li><code>CompReadyTestCell</code> <code>environment</code>/<code>testId</code> plumbing: <code>CompCapTestRow</code> is the only caller and now passes <code>columnNames[idx]</code> and <code>testCols.test_id</code>.
+</li>
+<li><code>TriagedRegressionTestList</code> behavior for <code>undefined</code> (event-filled lists in <code>TriagedTestsPanel</code>) versus <code>null</code> (empty triage) and the new unit test for the <code>null</code> case.
+</li>
+<li><code>data-testid</code> uniqueness within a rendered page, including the regressed-tests modal where <code>RegressedTestsTabPanel</code> renders children only for the active tab, so <code>triage-regressions</code> is not duplicated.
+</li>
+<li><code>TriagePotentialMatches</code> removal of the second <code>setIsModalOpen(true)</code>: <code>findPotentialMatches</code> already sets it on entry, and the link-success path now closes the dialog and clears selection explicitly.
+</li>
+<li>PR checks on <code>a237d3036</code>: <code>ci/prow/unit</code>, <code>lint</code>, <code>e2e</code>, <code>build</code>, <code>images</code>, <code>integration</code>, <code>verify</code>, <code>security</code> all pass.
+</li></ul>
+<h2>Open questions</h2>
+<ul>
+<li><code>Triage.jsx</code> deliberately has no request-generation guard after <code>789e5a0e1</code>, so a slow load for the previous id can still be applied after navigating from <code>/triages/42</code> to <code>/triages/43</code>. Was that tradeoff only about keeping the force-close message mounted, or would a guard keyed on <code>id</code> (not a global sequence) preserve that behavior too?
+</li>
+<li>The guard itself is unit-tested (<code>createLatestRequest</code>), but nothing drives an out-of-order response through the page components. Will the BDD suite cover "slow older response arrives after a newer one" for at least the main report and test-details pages, or should a component-level regression test be added here?
+</li>
+<li>The main-route loading view now duplicates the provider stack plus <code>Sidebar</code> from the loaded layout. Was extracting a shared wrapper considered, so a future layout change cannot let the loading and loaded views diverge?
+</li></ul>
+</main></body></html>
